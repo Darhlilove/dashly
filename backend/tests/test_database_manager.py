@@ -6,6 +6,7 @@ import pytest
 import tempfile
 import os
 import csv
+import uuid
 from pathlib import Path
 import sys
 
@@ -21,31 +22,46 @@ class TestDatabaseManager:
     
     @pytest.fixture
     def temp_db_path(self):
-        """Create a temporary database file path."""
-        # Create a temporary directory and generate a path, but don't create the file
-        temp_dir = tempfile.mkdtemp()
-        db_path = os.path.join(temp_dir, 'test.duckdb')
-        yield db_path
+        """Create a temporary database file path within the data directory."""
+        # Ensure data directory exists
+        data_dir = Path("data")
+        data_dir.mkdir(exist_ok=True)
+        
+        # Create a unique test database path within the data directory
+        import uuid
+        db_filename = f"test_{uuid.uuid4().hex[:8]}.duckdb"
+        db_path = data_dir / db_filename
+        
+        yield str(db_path)
+        
         # Cleanup
-        if os.path.exists(db_path):
-            os.unlink(db_path)
-        if os.path.exists(temp_dir):
-            os.rmdir(temp_dir)
+        if db_path.exists():
+            db_path.unlink()
     
     @pytest.fixture
     def sample_csv_path(self):
-        """Create a sample CSV file for testing."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='') as f:
+        """Create a sample CSV file for testing within the project directory."""
+        # Ensure data directory exists
+        data_dir = Path("data")
+        data_dir.mkdir(exist_ok=True)
+        
+        # Create a unique test CSV file within the data directory
+        csv_filename = f"test_{uuid.uuid4().hex[:8]}.csv"
+        csv_path = data_dir / csv_filename
+        
+        # Write sample data
+        with open(csv_path, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['id', 'name', 'age', 'salary'])
             writer.writerow([1, 'John Doe', 30, 50000.0])
             writer.writerow([2, 'Jane Smith', 25, 60000.0])
             writer.writerow([3, 'Bob Johnson', 35, 55000.0])
-            csv_path = f.name
-        yield csv_path
+        
+        yield str(csv_path)
+        
         # Cleanup
-        if os.path.exists(csv_path):
-            os.unlink(csv_path)
+        if csv_path.exists():
+            csv_path.unlink()
     
     @pytest.fixture
     def db_manager(self, temp_db_path):
@@ -57,16 +73,31 @@ class TestDatabaseManager:
     def test_database_manager_initialization(self, temp_db_path):
         """Test DatabaseManager initialization."""
         manager = DatabaseManager(temp_db_path)
-        assert manager.db_path == temp_db_path
+        # The path gets converted to absolute during validation
+        expected_path = str(Path(temp_db_path).resolve())
+        assert manager.db_path == expected_path
         assert manager.conn is not None
         manager.close()
     
     def test_data_directory_creation(self):
         """Test that data directory is created if it doesn't exist."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            db_path = os.path.join(temp_dir, 'subdir', 'test.duckdb')
-            manager = DatabaseManager(db_path)
-            assert os.path.exists(os.path.dirname(db_path))
+        # Create a subdirectory within the data directory
+        data_dir = Path("data")
+        data_dir.mkdir(exist_ok=True)
+        
+        subdir = data_dir / "test_subdir"
+        db_path = subdir / f"test_{uuid.uuid4().hex[:8]}.duckdb"
+        
+        try:
+            manager = DatabaseManager(str(db_path))
+            assert subdir.exists()
+            manager.close()
+        finally:
+            # Cleanup
+            if db_path.exists():
+                db_path.unlink()
+            if subdir.exists():
+                subdir.rmdir()
             manager.close()
     
     def test_ingest_csv_success(self, db_manager, sample_csv_path):
@@ -96,8 +127,14 @@ class TestDatabaseManager:
         result1 = db_manager.ingest_csv(sample_csv_path, 'test_table')
         assert result1.row_count == 3
         
-        # Create a different CSV with more rows
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='') as f:
+        # Create a different CSV with more rows within the data directory
+        data_dir = Path("data")
+        data_dir.mkdir(exist_ok=True)
+        
+        new_csv_filename = f"test_replace_{uuid.uuid4().hex[:8]}.csv"
+        new_csv_path = data_dir / new_csv_filename
+        
+        with open(new_csv_path, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['id', 'name', 'age', 'salary'])
             writer.writerow([1, 'Alice', 28, 70000.0])
@@ -105,14 +142,14 @@ class TestDatabaseManager:
             writer.writerow([3, 'Charlie', 29, 75000.0])
             writer.writerow([4, 'Diana', 31, 85000.0])
             writer.writerow([5, 'Eve', 27, 72000.0])
-            new_csv_path = f.name
         
         try:
             # Second ingestion should replace the table
-            result2 = db_manager.ingest_csv(new_csv_path, 'test_table')
+            result2 = db_manager.ingest_csv(str(new_csv_path), 'test_table')
             assert result2.row_count == 5
         finally:
-            os.unlink(new_csv_path)
+            if new_csv_path.exists():
+                new_csv_path.unlink()
     
     def test_get_schema_empty_database(self, db_manager):
         """Test getting schema from empty database."""
@@ -210,17 +247,22 @@ class TestDatabaseManager:
         # Create first table
         db_manager.ingest_csv(sample_csv_path, 'table1')
         
-        # Create second CSV with different structure
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='') as f:
+        # Create second CSV with different structure within the data directory
+        data_dir = Path("data")
+        data_dir.mkdir(exist_ok=True)
+        
+        csv2_filename = f"test_table2_{uuid.uuid4().hex[:8]}.csv"
+        csv2_path = data_dir / csv2_filename
+        
+        with open(csv2_path, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['product_id', 'product_name', 'price'])
             writer.writerow([1, 'Widget A', 19.99])
             writer.writerow([2, 'Widget B', 29.99])
-            csv2_path = f.name
         
         try:
             # Create second table
-            db_manager.ingest_csv(csv2_path, 'table2')
+            db_manager.ingest_csv(str(csv2_path), 'table2')
             
             # Check schema contains both tables
             schema = db_manager.get_schema()
@@ -239,20 +281,26 @@ class TestDatabaseManager:
             assert table2.row_count == 2
             
         finally:
-            os.unlink(csv2_path)
+            if csv2_path.exists():
+                csv2_path.unlink()
     
     def test_sample_data_limit(self, db_manager):
         """Test that sample data is limited to 5 rows."""
-        # Create CSV with more than 5 rows
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, newline='') as f:
+        # Create CSV with more than 5 rows within the data directory
+        data_dir = Path("data")
+        data_dir.mkdir(exist_ok=True)
+        
+        csv_filename = f"test_limit_{uuid.uuid4().hex[:8]}.csv"
+        csv_path = data_dir / csv_filename
+        
+        with open(csv_path, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['id', 'value'])
             for i in range(10):  # 10 rows
                 writer.writerow([i, f'value_{i}'])
-            csv_path = f.name
         
         try:
-            db_manager.ingest_csv(csv_path, 'test_table')
+            db_manager.ingest_csv(str(csv_path), 'test_table')
             table_info = db_manager.get_table_info('test_table')
             
             # Should have 10 total rows but only 5 sample rows
@@ -260,7 +308,8 @@ class TestDatabaseManager:
             assert len(table_info.sample_data) == 5
             
         finally:
-            os.unlink(csv_path)
+            if csv_path.exists():
+                csv_path.unlink()
 
 
 if __name__ == '__main__':

@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 import duckdb
 import os
+import threading
+from queue import Queue, Empty
+from contextlib import contextmanager
 from typing import Dict, Any, List, Optional
 
 # Import the new models
@@ -15,7 +18,11 @@ try:
         ErrorResponse,
         UploadResult,
         TableMetadata,
-        TableInfo
+        TableInfo,
+        ExecuteRequest,
+        ExecuteResponse,
+        ExplainResponse,
+        SQLErrorResponse
     )
     
     # Import the components
@@ -25,13 +32,28 @@ try:
     from .auth import verify_api_key, SecurityHeadersMiddleware
     from .rate_limiter import RateLimitMiddleware, api_rate_limiter
     
+    # Import SQL execution components
+    from .sql_validator import SQLValidator
+    from .query_executor import QueryExecutor
+    from .performance_monitor import get_performance_monitor
+    from .query_explain_service import QueryExplainService
+    
     # Import error handling
     from .error_handlers import ErrorHandler, handle_api_exception
     from .exceptions import (
         DemoDataNotFoundError,
         FileUploadError,
         DatabaseError,
-        SchemaExtractionError
+        SchemaExtractionError,
+        ValidationError,
+        QueryExecutionError,
+        SQLSyntaxError,
+        SQLSecurityError,
+        QueryTimeoutError,
+        ResultSetTooLargeError,
+        SQLSchemaError,
+        ConcurrentQueryLimitError,
+        QueryExplainError
     )
     from .logging_config import get_logger, DashlyLogger
 except ImportError:
@@ -43,7 +65,11 @@ except ImportError:
         ErrorResponse,
         UploadResult,
         TableMetadata,
-        TableInfo
+        TableInfo,
+        ExecuteRequest,
+        ExecuteResponse,
+        ExplainResponse,
+        SQLErrorResponse
     )
     
     # Import the components
@@ -53,13 +79,28 @@ except ImportError:
     from auth import verify_api_key, SecurityHeadersMiddleware
     from rate_limiter import RateLimitMiddleware, api_rate_limiter
     
+    # Import SQL execution components
+    from sql_validator import SQLValidator
+    from query_executor import QueryExecutor
+    from performance_monitor import get_performance_monitor
+    from query_explain_service import QueryExplainService
+    
     # Import error handling
     from error_handlers import ErrorHandler, handle_api_exception
     from exceptions import (
         DemoDataNotFoundError,
         FileUploadError,
         DatabaseError,
-        SchemaExtractionError
+        SchemaExtractionError,
+        ValidationError,
+        QueryExecutionError,
+        SQLSyntaxError,
+        SQLSecurityError,
+        QueryTimeoutError,
+        ResultSetTooLargeError,
+        SQLSchemaError,
+        ConcurrentQueryLimitError,
+        QueryExplainError
     )
     from logging_config import get_logger, DashlyLogger
 
@@ -96,16 +137,206 @@ logger = get_logger(__name__)
 # Initialize DuckDB connection - using data/demo.duckdb for consistency
 DB_PATH = "data/demo.duckdb"
 
-class DatabaseConnection:
-    """Manages database connection with error handling and reconnection."""
+import threading
+from queue import Queue, Empty
+from contextlib import contextmanager
+
+class DatabaseConnectionPool:
+    """Manages a pool of database connections for concurrent access."""
     
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, pool_size: int = 5):
+        """
+        Initialize connection pool.
+        
+        Args:
+            db_path: Path to the DuckDB database file
+            pool_size: Maximum number of connections in the pool
+        """
         self.db_path = db_path
-        self._conn = None
-        self._connect()
+        self.pool_size = pool_size
+        self._pool = Queue(maxsize=pool_size)
+        self._lock = threading.Lock()
+        self._created_connections = 0
+        
+        # Ensure data directory exists
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        
+        # Pre-create initial connection to test database access
+        self._create_connection()
+        logger.info(f"Database connection pool initialized: {self.db_path} (max_size={pool_size})")
+    
+    def _create_connection(self):
+        """Create a new database connection."""
+        try:
+            conn = duckdb.connect(self.db_path)
+            # Test the connection
+            conn.execute("SELECT 1").fetchone()
+            return conn
+        except Exception as e:
+            logger.error(f"Failed to create database connection: {str(e)}")
+            raise HTTPException(
+                status_code=503, 
+                detail="Database service temporarily unavailable"
+            )
+    
+    @contextmanager
+    def get_connection(self, timeout: float = 5.0):
+        """
+        Get a connection from the pool with timeout.
+        
+        Args:
+            timeout: Maximum time to wait for a connection
+            
+        Yields:
+            DuckDB connection instance
+        """
+        conn = None
+        created_new = False
+        
+        try:
+            # Try to get existing connection from pool first
+            try:
+                conn = self._pool.get_nowait()
+                logger.debug("Retrieved connection from pool")
+            except Empty:
+                # Pool is empty, create new connection if under limit
+                with self._lock:
+                    if self._created_connections < self.pool_size:
+                        conn = self._create_connection()
+                        self._created_connections += 1
+                        created_new = True
+                        logger.debug(f"Created new connection ({self._created_connections}/{self.pool_size})")
+                    else:
+                        # Wait for a connection to become available with shorter timeout
+                        try:
+                            conn = self._pool.get(timeout=timeout)
+                            logger.debug("Retrieved connection from pool after waiting")
+                        except Empty:
+                            logger.error(f"Connection pool timeout after {timeout}s")
+                            raise HTTPException(
+                                status_code=503, 
+                                detail="Database connection pool exhausted"
+                            )
+            
+            # Minimal connection test - don't test if we just created it
+            if not created_new:
+                try:
+                    conn.execute("SELECT 1").fetchone()
+                except Exception as e:
+                    logger.warning(f"Connection test failed, creating new one: {str(e)}")
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                    conn = self._create_connection()
+                    created_new = True
+            
+            yield conn
+            
+        except HTTPException:
+            # Re-raise HTTP exceptions as-is
+            if conn and created_new:
+                try:
+                    conn.close()
+                except:
+                    pass
+                with self._lock:
+                    self._created_connections -= 1
+            raise
+        except Exception as e:
+            # Check if this is a SQL-related error that should be passed through
+            error_msg = str(e).lower()
+            if any(keyword in error_msg for keyword in ["syntax error", "parser error", "parse error", "table", "column", "not found", "does not exist"]):
+                # This is a SQL error, not a connection error - let it bubble up
+                if conn and created_new:
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                    with self._lock:
+                        self._created_connections -= 1
+                raise e
+            
+            # This is a genuine connection error
+            logger.error(f"Failed to get database connection: {str(e)}")
+            if conn:
+                try:
+                    conn.close()
+                except:
+                    pass
+                if created_new:
+                    with self._lock:
+                        self._created_connections -= 1
+            raise HTTPException(
+                status_code=503, 
+                detail="Database service temporarily unavailable"
+            )
+        finally:
+            # Return connection to pool if it's healthy
+            if conn:
+                try:
+                    # Try to return to pool with short timeout
+                    try:
+                        self._pool.put_nowait(conn)
+                        logger.debug("Returned connection to pool")
+                    except:
+                        # Pool is full, close the connection
+                        logger.debug("Pool full, closing connection")
+                        conn.close()
+                        with self._lock:
+                            self._created_connections -= 1
+                except Exception as e:
+                    logger.warning(f"Connection failed to return to pool, discarding: {str(e)}")
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                    with self._lock:
+                        self._created_connections -= 1
+    
+    def close_all(self):
+        """Close all connections in the pool."""
+        closed_count = 0
+        while not self._pool.empty():
+            try:
+                conn = self._pool.get_nowait()
+                conn.close()
+                closed_count += 1
+            except Empty:
+                break
+            except Exception as e:
+                logger.warning(f"Error closing pooled connection: {str(e)}")
+        
+        logger.info(f"Closed {closed_count} pooled connections")
+
+
+class DatabaseConnection:
+    """Manages database connection with error handling, reconnection, and connection pooling."""
+    
+    def __init__(self, db_path: str, enable_pooling: bool = True, pool_size: int = 5):
+        """
+        Initialize database connection manager.
+        
+        Args:
+            db_path: Path to the DuckDB database file
+            enable_pooling: Whether to use connection pooling for concurrent access
+            pool_size: Maximum number of connections in the pool
+        """
+        self.db_path = db_path
+        self.enable_pooling = enable_pooling
+        
+        if enable_pooling:
+            self._pool = DatabaseConnectionPool(db_path, pool_size)
+            self._conn = None  # No single connection when pooling
+            logger.info(f"Database connection manager initialized with pooling: {self.db_path}")
+        else:
+            self._pool = None
+            self._conn = None
+            self._connect()
+            logger.info(f"Database connection manager initialized without pooling: {self.db_path}")
     
     def _connect(self):
-        """Establish database connection."""
+        """Establish single database connection (non-pooled mode)."""
         try:
             # Ensure data directory exists
             os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
@@ -120,44 +351,104 @@ class DatabaseConnection:
     
     def execute(self, query: str, parameters=None):
         """Execute query with automatic reconnection on failure."""
-        try:
-            if parameters:
-                return self._conn.execute(query, parameters)
-            else:
-                return self._conn.execute(query)
-        except Exception as e:
-            logger.warning(f"Query failed, attempting reconnection: {str(e)}")
+        if self.enable_pooling:
+            # Use connection pool with shorter timeout
+            with self._pool.get_connection(timeout=2.0) as conn:
+                try:
+                    if parameters:
+                        return conn.execute(query, parameters)
+                    else:
+                        return conn.execute(query)
+                except Exception as e:
+                    logger.warning(f"Pooled query failed: {str(e)}")
+                    # Re-raise the original exception instead of wrapping it
+                    raise e
+        else:
+            # Use single connection with reconnection
             try:
-                self._connect()
                 if parameters:
                     return self._conn.execute(query, parameters)
                 else:
                     return self._conn.execute(query)
-            except Exception as reconnect_error:
-                logger.error(f"Database reconnection failed: {str(reconnect_error)}")
-                raise HTTPException(
-                    status_code=503, 
-                    detail="Database service temporarily unavailable"
-                )
+            except Exception as e:
+                logger.warning(f"Query failed, attempting reconnection: {str(e)}")
+                try:
+                    self._connect()
+                    if parameters:
+                        return self._conn.execute(query, parameters)
+                    else:
+                        return self._conn.execute(query)
+                except Exception as reconnect_error:
+                    logger.error(f"Database reconnection failed: {str(reconnect_error)}")
+                    raise HTTPException(
+                        status_code=503, 
+                        detail="Database service temporarily unavailable"
+                    )
     
     @property
     def description(self):
-        """Get query description."""
-        return self._conn.description
+        """Get query description (only works in non-pooled mode)."""
+        if self.enable_pooling:
+            logger.warning("Description property not available in pooled mode")
+            return None
+        return self._conn.description if self._conn else None
+    
+    @contextmanager
+    def get_connection(self, timeout: float = 2.0):
+        """
+        Get a database connection for direct use.
+        
+        Args:
+            timeout: Maximum time to wait for a connection
+        
+        Yields:
+            DuckDB connection instance
+        """
+        if self.enable_pooling:
+            with self._pool.get_connection(timeout=timeout) as conn:
+                yield conn
+        else:
+            if not self._conn:
+                self._connect()
+            yield self._conn
     
     def close(self):
-        """Close database connection."""
-        if self._conn:
+        """Close database connection(s)."""
+        if self.enable_pooling and self._pool:
+            self._pool.close_all()
+            logger.info("Database connection pool closed")
+        elif self._conn:
             self._conn.close()
             self._conn = None
+            logger.info("Database connection closed")
 
 # Initialize shared database connection
 db_connection = DatabaseConnection(DB_PATH)
 
-# Initialize components for CSV upload functionality
+# Initialize components for CSV upload functionality with shared connection
 file_handler = FileUploadHandler(data_directory="data")
-db_manager = DatabaseManager(db_path=DB_PATH)
+db_manager = DatabaseManager(db_path=DB_PATH, shared_connection=db_connection)
 schema_service = SchemaService(db_manager=db_manager)
+
+# Initialize SQL execution configuration
+try:
+    from .sql_execution_config import get_sql_execution_config
+except ImportError:
+    from sql_execution_config import get_sql_execution_config
+
+sql_config = get_sql_execution_config()
+
+# Initialize SQL execution components with configuration
+sql_validator = SQLValidator()
+query_executor = QueryExecutor(
+    db_connection, 
+    timeout_seconds=sql_config.query_timeout_seconds, 
+    max_rows=sql_config.max_result_rows,
+    max_concurrent=sql_config.max_concurrent_queries,
+    memory_limit_mb=sql_config.memory_limit_mb
+)
+performance_monitor = get_performance_monitor(slow_query_threshold_ms=sql_config.slow_query_threshold_ms)
+query_explain_service = QueryExplainService(db_connection, sql_validator)
 
 class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000, description="Natural language query")
@@ -179,7 +470,7 @@ class QueryRequest(BaseModel):
                 from sql_validator import sql_validator
             
             # Use comprehensive SQL validator
-            return sql_validator.validate_query(v)
+            return sql_validator.validate_query_legacy(v)
         return v
     
 class QueryResponse(BaseModel):
@@ -305,13 +596,14 @@ async def process_query(request: QueryRequest, authenticated: bool = Depends(ver
         # TODO: Implement LLM integration for NL to SQL translation
         # For now, return a mock response with validation
         mock_sql = "SELECT * FROM sales LIMIT 10"
-        sql_to_execute = sql_validator.validate_query(mock_sql)
+        sql_to_execute = sql_validator.validate_query_legacy(mock_sql)
         logger.info("Using mock SQL query (LLM integration pending)")
     
     # Execute validated query against DuckDB with connection error handling
     try:
-        result = db_connection.execute(sql_to_execute).fetchall()
-        columns = [desc[0] for desc in db_connection.description]
+        with db_connection.get_connection() as conn:
+            result = conn.execute(sql_to_execute).fetchall()
+            columns = [desc[0] for desc in conn.description]
         
         # Convert to list of dictionaries
         data = [dict(zip(columns, row)) for row in result]
@@ -374,11 +666,325 @@ async def list_tables(authenticated: bool = Depends(verify_api_key)):
     logger.info("Tables list request received")
     
     # Execute query with connection error handling
-    result = db_connection.execute("SHOW TABLES").fetchall()
-    tables = [row[0] for row in result]
+    with db_connection.get_connection() as conn:
+        result = conn.execute("SHOW TABLES").fetchall()
+        tables = [row[0] for row in result]
     
     logger.info(f"Tables listed: {len(tables)} tables found")
     return {"tables": tables}
+
+@app.post("/api/execute", response_model=ExecuteResponse)
+@handle_api_exception
+async def execute_sql_query(
+    request: ExecuteRequest, 
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Execute validated SQL query against the DuckDB database.
+    
+    This endpoint provides secure SQL query execution with comprehensive validation,
+    performance monitoring, and error handling. Only SELECT statements are allowed.
+    
+    Args:
+        request: ExecuteRequest containing the SQL query to execute
+        authenticated: Authentication verification dependency
+        
+    Returns:
+        ExecuteResponse: Query results with columns, rows, metadata, and timing
+        
+    Raises:
+        HTTPException: Various status codes based on error type:
+            - 400: SQL validation errors, execution errors
+            - 408: Query timeout errors
+            - 422: Invalid request format
+            - 500: Internal server errors
+    """
+    # Log the incoming request
+    DashlyLogger.log_api_request(logger, "POST", "/api/execute", 0)
+    logger.info(f"SQL execution request: {request.sql[:100]}...")
+    
+    # Start performance monitoring
+    with performance_monitor.start_timing("sql_execution") as timing_context:
+        # Step 1: Validate the SQL query - Requirements 2.1, 2.2, 2.3, 2.4, 2.5, 2.6
+        logger.debug("Starting SQL validation")
+        validation_result = sql_validator.validate_query(request.sql)
+        
+        if not validation_result.is_valid:
+            # Log security violations
+            for violation in validation_result.security_violations:
+                DashlyLogger.log_security_event(
+                    logger, 
+                    violation.violation_type.upper(), 
+                    f"{violation.description} - Query: {request.sql[:50]}..."
+                )
+            
+            # Record failed execution in performance monitor
+            runtime_ms = timing_context.get_elapsed_ms()
+            performance_monitor.record_execution(
+                sql=request.sql,
+                runtime_ms=runtime_ms,
+                success=False,
+                error_message=f"Validation failed: {'; '.join(validation_result.errors)}"
+            )
+            
+            # Determine the type of validation error and create appropriate exception
+            first_violation = validation_result.security_violations[0] if validation_result.security_violations else None
+            
+            if first_violation and first_violation.violation_type == "syntax_error":
+                # Syntax error with position tracking
+                raise SQLSyntaxError(
+                    message=validation_result.errors[0],
+                    position=first_violation.position
+                )
+            elif first_violation and "non_select" in first_violation.violation_type:
+                # Security violation
+                raise SQLSecurityError(
+                    message=validation_result.errors[0],
+                    violation_type=first_violation.violation_type,
+                    position=first_violation.position
+                )
+            else:
+                # General validation error
+                error_detail = "; ".join(validation_result.errors)
+                raise SQLSyntaxError(message=error_detail)
+        
+        logger.info("SQL validation passed")
+        
+        try:
+            # Step 2: Execute the validated query - Requirements 1.2, 1.3, 6.1, 6.2
+            logger.debug("Starting query execution")
+            query_result = query_executor.execute_with_limits(request.sql, max_rows=10000)
+            
+            logger.info(f"Query executed successfully: {query_result.row_count} rows in {query_result.runtime_ms:.2f}ms")
+            
+            # Step 3: Record successful execution in performance monitor - Requirements 3.1, 3.2, 3.3
+            performance_monitor.record_execution(
+                sql=request.sql,
+                runtime_ms=query_result.runtime_ms,
+                success=True,
+                row_count=query_result.row_count,
+                truncated=query_result.truncated
+            )
+            
+            # Step 4: Format and return response - Requirements 1.3, 1.5
+            response = ExecuteResponse(
+                columns=query_result.columns,
+                rows=query_result.rows,
+                row_count=query_result.row_count,
+                runtime_ms=query_result.runtime_ms,
+                truncated=query_result.truncated
+            )
+            
+            # Log successful response
+            logger.info(f"SQL execution completed successfully: {query_result.row_count} rows, {query_result.runtime_ms:.2f}ms")
+            if query_result.truncated:
+                logger.warning(f"Results truncated to {query_result.row_count} rows")
+            
+            return response
+            
+        except (SQLSyntaxError, SQLSecurityError, QueryTimeoutError, 
+                ResultSetTooLargeError, SQLSchemaError, ConcurrentQueryLimitError) as e:
+            # Handle SQL-specific errors with detailed context - Requirements 5.1, 5.2, 5.3, 5.4
+            runtime_ms = timing_context.get_elapsed_ms()
+            
+            performance_monitor.record_execution(
+                sql=request.sql,
+                runtime_ms=runtime_ms,
+                success=False,
+                error_message=str(e)
+            )
+            
+            # Use ErrorHandler to convert to appropriate HTTP response
+            http_exc = ErrorHandler.handle_exception(e, context="sql_execution")
+            raise http_exc
+            
+        except QueryExecutionError as e:
+            # Handle general query execution errors - Requirements 5.2, 5.4
+            runtime_ms = timing_context.get_elapsed_ms()
+            error_msg = str(e)
+            
+            performance_monitor.record_execution(
+                sql=request.sql,
+                runtime_ms=runtime_ms,
+                success=False,
+                error_message=error_msg
+            )
+            
+            # Determine if this is a schema-related error and create specific exception
+            if any(keyword in error_msg.lower() for keyword in ["table", "column", "not found", "does not exist"]):
+                # Extract table/column name if possible
+                missing_object = None
+                if "table" in error_msg.lower():
+                    # Try to extract table name from error message
+                    import re
+                    match = re.search(r"table['\s]*(['\"]?)(\w+)\1", error_msg, re.IGNORECASE)
+                    if match:
+                        missing_object = match.group(2)
+                
+                schema_error = SQLSchemaError(
+                    message=error_msg,
+                    missing_object=missing_object,
+                    object_type="table" if "table" in error_msg.lower() else "column"
+                )
+                http_exc = ErrorHandler.handle_exception(schema_error, context="sql_execution")
+                raise http_exc
+            else:
+                # General execution error
+                http_exc = ErrorHandler.handle_exception(e, context="sql_execution")
+                raise http_exc
+            
+        except Exception as e:
+            # Handle unexpected errors - Requirements 5.2
+            runtime_ms = timing_context.get_elapsed_ms()
+            
+            performance_monitor.record_execution(
+                sql=request.sql,
+                runtime_ms=runtime_ms,
+                success=False,
+                error_message=str(e)
+            )
+            
+            # Use ErrorHandler for consistent error handling
+            http_exc = ErrorHandler.handle_exception(e, context="sql_execution")
+            raise http_exc
+
+@app.get("/api/execute/explain", response_model=ExplainResponse)
+@handle_api_exception
+async def explain_sql_query(
+    sql: str,
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Analyze SQL query and return execution plan with cost estimation.
+    
+    This endpoint provides query analysis using DuckDB's EXPLAIN functionality
+    without executing the actual query. It returns detailed execution plans,
+    cost estimates, and optimization suggestions.
+    
+    Args:
+        sql: SQL query to analyze (query parameter)
+        authenticated: Authentication verification dependency
+        
+    Returns:
+        ExplainResponse: Query analysis with execution plan and cost estimation
+        
+    Raises:
+        HTTPException: Various status codes based on error type:
+            - 400: SQL validation errors, explain failures
+            - 422: Invalid request format
+            - 500: Internal server errors
+    """
+    # Log the incoming request
+    DashlyLogger.log_api_request(logger, "GET", "/api/execute/explain", 0)
+    logger.info(f"SQL explain request: {sql[:100]}...")
+    
+    # Start performance monitoring
+    with performance_monitor.start_timing("sql_explain") as timing_context:
+        try:
+            # Step 1: Generate comprehensive query explanation - Requirements 4.1, 4.2, 4.3, 4.4, 4.5
+            logger.debug("Starting query explanation")
+            explanation_result = query_explain_service.explain_query(sql)
+            
+            logger.info(f"Query explanation completed: cost={explanation_result.estimated_cost:.2f}, "
+                       f"rows={explanation_result.estimated_rows}, "
+                       f"time={explanation_result.estimated_runtime_ms:.2f}ms")
+            
+            # Step 2: Record successful explanation in performance monitor
+            runtime_ms = timing_context.get_elapsed_ms()
+            performance_monitor.record_execution(
+                sql=f"EXPLAIN {sql}",
+                runtime_ms=runtime_ms,
+                success=True,
+                row_count=0,  # EXPLAIN doesn't return data rows
+                truncated=False
+            )
+            
+            # Step 3: Format and return response - Requirements 4.3, 4.4, 4.5
+            response = ExplainResponse(
+                execution_plan=explanation_result.execution_plan,
+                estimated_cost=explanation_result.estimated_cost,
+                estimated_rows=explanation_result.estimated_rows,
+                estimated_runtime_ms=explanation_result.estimated_runtime_ms,
+                optimization_suggestions=explanation_result.optimization_suggestions
+            )
+            
+            # Log successful response
+            logger.info(f"SQL explain completed successfully: cost={explanation_result.estimated_cost:.2f}, "
+                       f"suggestions={len(explanation_result.optimization_suggestions)}")
+            
+            return response
+            
+        except ValidationError as e:
+            # Handle validation errors - Requirements 4.1
+            runtime_ms = timing_context.get_elapsed_ms()
+            error_msg = str(e)
+            logger.warning(f"SQL validation error in explain: {error_msg}")
+            
+            performance_monitor.record_execution(
+                sql=f"EXPLAIN {sql}",
+                runtime_ms=runtime_ms,
+                success=False,
+                error_message=f"Validation error: {error_msg}"
+            )
+            
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "sql_validation_failed",
+                    "detail": error_msg,
+                    "sql_error_type": "syntax",
+                    "position": None,
+                    "suggestions": ["Check SQL syntax", "Ensure query is a valid SELECT statement"]
+                }
+            )
+            
+        except QueryExplainError as e:
+            # Handle explain-specific errors - Requirements 4.5
+            runtime_ms = timing_context.get_elapsed_ms()
+            error_msg = str(e)
+            logger.error(f"Query explain error: {error_msg}")
+            
+            performance_monitor.record_execution(
+                sql=f"EXPLAIN {sql}",
+                runtime_ms=runtime_ms,
+                success=False,
+                error_message=f"Explain error: {error_msg}"
+            )
+            
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "query_explain_failed",
+                    "detail": error_msg,
+                    "sql_error_type": "explain",
+                    "position": None,
+                    "suggestions": ["Check query syntax", "Ensure tables exist", "Try a simpler query"]
+                }
+            )
+            
+        except Exception as e:
+            # Handle unexpected errors - Requirements 4.5
+            runtime_ms = timing_context.get_elapsed_ms()
+            error_msg = str(e)
+            logger.error(f"Unexpected error during SQL explain: {error_msg}")
+            
+            performance_monitor.record_execution(
+                sql=f"EXPLAIN {sql}",
+                runtime_ms=runtime_ms,
+                success=False,
+                error_message=f"Unexpected error: {error_msg}"
+            )
+            
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "internal_server_error",
+                    "detail": "An unexpected error occurred during query analysis",
+                    "sql_error_type": "internal",
+                    "position": None,
+                    "suggestions": ["Try again later", "Contact support if the problem persists"]
+                }
+            )
 
 @app.on_event("shutdown")
 async def shutdown_event():

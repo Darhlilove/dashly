@@ -52,12 +52,13 @@ class DatabaseManager:
     # Security configuration
     config = SecurityConfig()
     
-    def __init__(self, db_path: str = "data/demo.duckdb"):
+    def __init__(self, db_path: str = "data/demo.duckdb", shared_connection=None):
         """
         Initialize DatabaseManager with DuckDB connection.
         
         Args:
             db_path: Path to the DuckDB database file
+            shared_connection: Optional shared database connection to reuse
             
         Raises:
             DatabaseConnectionError: If database connection fails
@@ -65,11 +66,26 @@ class DatabaseManager:
         try:
             self.db_path = self._validate_db_path(db_path)
             self._ensure_data_directory()
-            self.conn = duckdb.connect(self.db_path)
-            logger.info(f"DatabaseManager initialized with database: {self.db_path}")
             
-            # Test connection
-            self.conn.execute("SELECT 1").fetchone()
+            # Use shared connection if provided, otherwise create new one
+            if shared_connection is not None:
+                # Store the shared connection wrapper for use
+                self._shared_wrapper = shared_connection
+                self.conn = None  # We'll use the wrapper's get_connection method
+                self._owns_connection = False
+                logger.info(f"DatabaseManager initialized with shared connection: {self.db_path}")
+                
+                # Test connection using the wrapper
+                with shared_connection.get_connection() as conn:
+                    conn.execute("SELECT 1").fetchone()
+            else:
+                self.conn = duckdb.connect(self.db_path)
+                self._shared_wrapper = None
+                self._owns_connection = True
+                logger.info(f"DatabaseManager initialized with new connection: {self.db_path}")
+                
+                # Test connection
+                self.conn.execute("SELECT 1").fetchone()
             logger.info("Database connection test successful")
             
         except Exception as e:
@@ -315,14 +331,25 @@ class DatabaseManager:
             # Use double quotes for safe identifier escaping in DuckDB
             escaped_table_name = f'"{validated_table_name}"'
             drop_sql = f"DROP TABLE IF EXISTS {escaped_table_name}"
-            self.conn.execute(drop_sql)
-            logger.debug(f"Dropped existing table: {validated_table_name}")
-            
-            # Create table from CSV using DuckDB's native CSV reader
-            # Use escaped table name and parameterized path
             create_sql = f"CREATE TABLE {escaped_table_name} AS SELECT * FROM read_csv_auto(?)"
-            self.conn.execute(create_sql, [validated_csv_path])
-            logger.debug(f"Created table from CSV: {validated_table_name}")
+            
+            if self._shared_wrapper:
+                with self._shared_wrapper.get_connection() as conn:
+                    conn.execute(drop_sql)
+                    logger.debug(f"Dropped existing table: {validated_table_name}")
+                    
+                    # Create table from CSV using DuckDB's native CSV reader
+                    # Use escaped table name and parameterized path
+                    conn.execute(create_sql, [validated_csv_path])
+                    logger.debug(f"Created table from CSV: {validated_table_name}")
+            else:
+                self.conn.execute(drop_sql)
+                logger.debug(f"Dropped existing table: {validated_table_name}")
+                
+                # Create table from CSV using DuckDB's native CSV reader
+                # Use escaped table name and parameterized path
+                self.conn.execute(create_sql, [validated_csv_path])
+                logger.debug(f"Created table from CSV: {validated_table_name}")
             
             # Get table metadata
             columns = self._get_table_columns(validated_table_name)
@@ -361,7 +388,11 @@ class DatabaseManager:
         """
         try:
             # Get all table names
-            tables_result = self.conn.execute("SHOW TABLES").fetchall()
+            if self._shared_wrapper:
+                with self._shared_wrapper.get_connection() as conn:
+                    tables_result = conn.execute("SHOW TABLES").fetchall()
+            else:
+                tables_result = self.conn.execute("SHOW TABLES").fetchall()
             table_names = [str(row[0]) for row in tables_result]
             
             tables_schema = {}
@@ -428,7 +459,12 @@ class DatabaseManager:
             # Get sample data (limit to configured rows) - using validated table name
             escaped_table_name = f'"{validated_table_name}"'
             sample_sql = f"SELECT * FROM {escaped_table_name} LIMIT ?"
-            sample_result = self.conn.execute(sample_sql, [self.config.MAX_SAMPLE_ROWS]).fetchall()
+            
+            if self._shared_wrapper:
+                with self._shared_wrapper.get_connection() as conn:
+                    sample_result = conn.execute(sample_sql, [self.config.MAX_SAMPLE_ROWS]).fetchall()
+            else:
+                sample_result = self.conn.execute(sample_sql, [self.config.MAX_SAMPLE_ROWS]).fetchall()
             column_names = [col.name for col in columns]
             
             # Create sample data dictionaries
@@ -477,7 +513,12 @@ class DatabaseManager:
             # Note: table_name should already be validated by caller
             escaped_table_name = f'"{table_name}"'
             describe_sql = f"DESCRIBE {escaped_table_name}"
-            columns_result = self.conn.execute(describe_sql).fetchall()
+            
+            if self._shared_wrapper:
+                with self._shared_wrapper.get_connection() as conn:
+                    columns_result = conn.execute(describe_sql).fetchall()
+            else:
+                columns_result = self.conn.execute(describe_sql).fetchall()
             
             columns = []
             for row in columns_result:
@@ -506,7 +547,12 @@ class DatabaseManager:
             # Note: table_name should already be validated by caller
             escaped_table_name = f'"{table_name}"'
             count_sql = f"SELECT COUNT(*) FROM {escaped_table_name}"
-            result = self.conn.execute(count_sql).fetchone()
+            
+            if self._shared_wrapper:
+                with self._shared_wrapper.get_connection() as conn:
+                    result = conn.execute(count_sql).fetchone()
+            else:
+                result = self.conn.execute(count_sql).fetchone()
             return int(result[0]) if result else 0
             
         except Exception as e:
@@ -528,7 +574,11 @@ class DatabaseManager:
             validated_table_name = self._validate_table_name(table_name)
             
             # Get all tables
-            tables_result = self.conn.execute("SHOW TABLES").fetchall()
+            if self._shared_wrapper:
+                with self._shared_wrapper.get_connection() as conn:
+                    tables_result = conn.execute("SHOW TABLES").fetchall()
+            else:
+                tables_result = self.conn.execute("SHOW TABLES").fetchall()
             table_names = [str(row[0]) for row in tables_result]
             return validated_table_name in table_names
             
@@ -540,9 +590,12 @@ class DatabaseManager:
             return False
     
     def close(self) -> None:
-        """Close the database connection."""
-        if hasattr(self, 'conn') and self.conn:
+        """Close the database connection if owned by this manager."""
+        if hasattr(self, 'conn') and self.conn and getattr(self, '_owns_connection', True):
             self.conn.close()
+            logger.info("DatabaseManager closed owned connection")
+        elif hasattr(self, 'conn') and self.conn:
+            logger.info("DatabaseManager released shared connection (not closed)")
     
     def __enter__(self):
         """Context manager entry."""

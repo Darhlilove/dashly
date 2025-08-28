@@ -6,7 +6,7 @@ to appropriate HTTP responses while maintaining security.
 """
 
 import logging
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 from fastapi import HTTPException
 
 try:
@@ -29,7 +29,15 @@ try:
         InvalidParameterError,
         ConfigurationError,
         DemoDataError,
-        DemoDataNotFoundError
+        DemoDataNotFoundError,
+        QueryExecutionError,
+        SQLSyntaxError,
+        SQLSecurityError,
+        QueryTimeoutError,
+        ResultSetTooLargeError,
+        QueryExplainError,
+        SQLSchemaError,
+        ConcurrentQueryLimitError
     )
     from .logging_config import get_logger
 except ImportError:
@@ -52,7 +60,15 @@ except ImportError:
         InvalidParameterError,
         ConfigurationError,
         DemoDataError,
-        DemoDataNotFoundError
+        DemoDataNotFoundError,
+        QueryExecutionError,
+        SQLSyntaxError,
+        SQLSecurityError,
+        QueryTimeoutError,
+        ResultSetTooLargeError,
+        QueryExplainError,
+        SQLSchemaError,
+        ConcurrentQueryLimitError
     )
     from logging_config import get_logger
 
@@ -69,6 +85,16 @@ class ErrorHandler:
         FileSizeExceededError: (413, "File size exceeds the maximum allowed limit."),
         FileValidationError: (400, "File validation failed. Please check your CSV format."),
         FileUploadError: (400, "File upload failed. Please try again."),
+        
+        # SQL execution errors (must come before DatabaseError since they inherit from it)
+        SQLSyntaxError: (400, "SQL syntax error in query."),
+        SQLSecurityError: (400, "SQL query violates security rules."),
+        QueryTimeoutError: (408, "Query execution timed out."),
+        ResultSetTooLargeError: (400, "Query result set too large."),
+        SQLSchemaError: (400, "SQL query references non-existent tables or columns."),
+        ConcurrentQueryLimitError: (429, "Too many concurrent queries."),
+        QueryExplainError: (400, "Query explanation failed."),
+        QueryExecutionError: (400, "Query execution failed."),
         
         # Database errors
         TableNotFoundError: (404, "Requested table not found."),
@@ -114,8 +140,21 @@ class ErrorHandler:
         context_str = f" (context: {context})" if context else ""
         logger.error(f"Exception occurred{context_str}: {type(exc).__name__}: {str(exc)}")
         
-        # Handle security exceptions specially
-        if isinstance(exc, SecurityError):
+        # Handle SQL security exceptions specially
+        if isinstance(exc, SQLSecurityError):
+            try:
+                from .logging_config import DashlyLogger
+            except ImportError:
+                from logging_config import DashlyLogger
+            DashlyLogger.log_security_event(
+                logger, 
+                f"SQL_SECURITY_VIOLATION_{exc.violation_type}",
+                f"SQL security violation: {str(exc)}{context_str}",
+                logging.ERROR
+            )
+        
+        # Handle general security exceptions
+        elif isinstance(exc, SecurityError):
             try:
                 from .logging_config import DashlyLogger
             except ImportError:
@@ -126,6 +165,21 @@ class ErrorHandler:
                 f"{str(exc)}{context_str}",
                 logging.ERROR
             )
+        
+        # Handle SQL-specific exceptions with detailed error responses
+        if isinstance(exc, QueryExecutionError):
+            status_code, base_message = cls.ERROR_MAPPINGS.get(type(exc), (400, "Query execution failed."))
+            
+            # Create detailed error response for SQL exceptions
+            error_detail = cls.create_sql_error_response(
+                error=type(exc).__name__.lower().replace('error', '_failed'),
+                detail=str(exc),
+                sql_error_type=exc.sql_error_type,
+                position=getattr(exc, 'position', None),
+                suggestions=getattr(exc, 'suggestions', [])
+            )
+            
+            return HTTPException(status_code=status_code, detail=error_detail)
         
         # Find the most specific exception type mapping
         for exc_type, (status_code, message) in cls.ERROR_MAPPINGS.items():
@@ -180,6 +234,37 @@ class ErrorHandler:
         
         if details:
             response["details"] = details
+        
+        return response
+    
+    @classmethod
+    def create_sql_error_response(cls, error: str, detail: str, sql_error_type: str,
+                                position: Optional[int] = None, 
+                                suggestions: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Create a SQL-specific error response with detailed context.
+        
+        Args:
+            error: Error type identifier
+            detail: Detailed error message
+            sql_error_type: Type of SQL error (syntax, security, execution, timeout)
+            position: Optional character position where error occurred
+            suggestions: Optional list of suggestions to fix the error
+            
+        Returns:
+            Dict[str, Any]: SQL error response matching SQLErrorResponse model
+        """
+        response = {
+            "error": error,
+            "detail": detail,
+            "sql_error_type": sql_error_type
+        }
+        
+        if position is not None:
+            response["position"] = position
+        
+        if suggestions:
+            response["suggestions"] = suggestions
         
         return response
     
