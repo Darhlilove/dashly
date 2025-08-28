@@ -1,0 +1,26 @@
+{
+  "enabled": true,
+  "name": "Security Pre-Commit Scanner",
+  "description": "Automatically scans code changes for security vulnerabilities, secrets, and potential security issues before they are committed to the repository",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "backend/src/**/*.py",
+      "frontend/src/**/*.tsx",
+      "frontend/src/**/*.ts",
+      "backend/**/*.py",
+      "frontend/**/*.js",
+      "frontend/**/*.jsx",
+      "**/*.env",
+      "**/*.config.js",
+      "**/*.config.ts",
+      "backend/requirements.txt",
+      "frontend/package.json"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Please perform a comprehensive security scan of the modified files. Check for: 1) Hardcoded secrets, API keys, passwords, or tokens 2) SQL injection vulnerabilities 3) XSS vulnerabilities 4) Insecure dependencies or packages 5) Unsafe file operations 6) Authentication/authorization issues 7) Data validation problems 8) Insecure configurations. For any issues found, provide specific line numbers, explain the security risk, and suggest secure alternatives. Focus on the DuckDB integration, LLM API calls, CSV processing, and frontend data handling based on this project's architecture."
+  }
+}

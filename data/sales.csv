@@ -1,0 +1,5 @@
+id,product_name,category,region,sales_amount,quantity
+1,Widget A,Electronics,North,1500.00,10
+2,Widget B,Electronics,South,2300.50,15
+3,Gadget X,Home,East,890.25,5
+4,Tool Y,Industrial,West,3200.00,8

@@ -1,0 +1,22 @@
+{
+  "enabled": true,
+  "name": "Task Completion Auto-Commit",
+  "description": "Monitors specification and documentation files for task list completions and automatically commits changes with descriptive messages when tasks are marked as done",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "*.md",
+      "project-brief.md",
+      "README.md",
+      "**/README.md",
+      "**/SECURITY.md",
+      "**/SECURITY_FIXES.md",
+      "**/*.md"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A task in a specification or documentation file appears to have been completed (marked as done, checked off, or status changed to complete). Please:\n\n1. Analyze the recent changes to identify which specific task was completed\n2. Generate an accurate, descriptive commit message that clearly describes what task was accomplished\n3. Commit the changes with this descriptive message\n4. Push the changes to the remote repository\n\nThe commit message should be in the format: \"Complete [task description]\" or \"Mark [task name] as done\" and should be specific about what was actually accomplished."
+  }
+}
