@@ -1,12 +1,74 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@layer base {
+  body {
+    margin: 0;
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: theme('colors.gray.50');
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+}
+
+@layer components {
+  /* Button styles following Notion-like design */
+  .btn-primary {
+    @apply bg-primary-600 text-white px-4 py-2 rounded-notion font-medium hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-secondary-700 border border-secondary-300 px-4 py-2 rounded-notion font-medium hover:bg-secondary-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply text-secondary-600 px-4 py-2 rounded-notion font-medium hover:bg-secondary-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Input styles */
+  .input-primary {
+    @apply w-full px-3 py-2 border border-secondary-300 rounded-notion focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors duration-200 disabled:bg-secondary-50 disabled:cursor-not-allowed;
+  }
+
+  /* Card styles */
+  .card {
+    @apply bg-white rounded-notion shadow-notion border border-secondary-200;
+  }
+
+  .card-hover {
+    @apply card hover:shadow-notion-hover transition-shadow duration-200 cursor-pointer;
+  }
+
+  /* Modal styles */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50;
+  }
+
+  .modal-content {
+    @apply bg-white rounded-notion shadow-modal max-w-2xl w-full max-h-[90vh] overflow-hidden;
+  }
+
+  /* Toast styles */
+  .toast {
+    @apply px-4 py-3 rounded-notion shadow-notion-hover border-l-4 animate-slide-up;
+  }
+
+  .toast-success {
+    @apply toast bg-success-50 border-success-500 text-success-800;
+  }
+
+  .toast-error {
+    @apply toast bg-error-50 border-error-500 text-error-800;
+  }
+
+  .toast-info {
+    @apply toast bg-primary-50 border-primary-500 text-primary-800;
+  }
 }
