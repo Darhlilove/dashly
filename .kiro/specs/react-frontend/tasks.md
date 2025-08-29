@@ -22,7 +22,7 @@
   - Write unit tests for file upload scenarios and demo data selection
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6_
 
-- [ ] 4. Implement QueryBox component for natural language input
+- [x] 4. Implement QueryBox component for natural language input
 
   - Create QueryBox component with textarea input and "Generate" button
   - Add loading states and disable button during API calls
