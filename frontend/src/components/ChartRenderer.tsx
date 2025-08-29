@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   LineChart,
   Line,
@@ -16,6 +16,9 @@ import {
 } from "recharts";
 import { ChartConfig, ChartData } from "../types";
 import { selectChartType, validateChartConfig } from "../utils/chartSelector";
+import SaveDashboardModal from "./SaveDashboardModal";
+import { apiService } from "../services/api";
+import { Dashboard } from "../types/dashboard";
 
 interface ChartRendererProps {
   data: ChartData;
@@ -23,6 +26,10 @@ interface ChartRendererProps {
   width?: number;
   height?: number;
   className?: string;
+  question?: string;
+  sql?: string;
+  onSaveSuccess?: (dashboard: Dashboard) => void;
+  onSaveError?: (error: string) => void;
 }
 
 // Color palette for charts
@@ -47,7 +54,13 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
   width,
   height = 400,
   className = "",
+  question,
+  sql,
+  onSaveSuccess,
+  onSaveError,
 }) => {
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   // Use provided config or automatically select chart type
   const chartConfig = config || selectChartType(data);
 
@@ -61,6 +74,36 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
       </div>
     );
   }
+
+  // Handle dashboard save
+  const handleSaveDashboard = async (name: string) => {
+    if (!question || !sql) {
+      onSaveError?.("Missing question or SQL query for dashboard save");
+      setShowSaveModal(false);
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const dashboard = await apiService.saveDashboard({
+        name,
+        question,
+        sql,
+        chartConfig,
+      });
+      
+      onSaveSuccess?.(dashboard);
+      setShowSaveModal(false);
+    } catch (error: any) {
+      const errorMessage = error.message || "Failed to save dashboard";
+      onSaveError?.(errorMessage);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Check if save functionality is available
+  const canSave = Boolean(question && sql);
 
   // Transform data for chart rendering
   const chartData = transformDataForChart(data, chartConfig);
@@ -78,10 +121,30 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
     height,
   };
 
+  const renderSaveButton = () => {
+    if (!canSave) return null;
+    
+    return (
+      <div className="flex justify-end mb-4">
+        <button
+          onClick={() => setShowSaveModal(true)}
+          disabled={isSaving}
+          className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
+        >
+          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+          Save Dashboard
+        </button>
+      </div>
+    );
+  };
+
   switch (chartConfig.type) {
     case "line":
       return (
         <div className={`w-full ${className}`}>
+          {renderSaveButton()}
           <ResponsiveContainer {...containerProps}>
             <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -115,12 +178,19 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
               )}
             </LineChart>
           </ResponsiveContainer>
+          <SaveDashboardModal
+            isOpen={showSaveModal}
+            onClose={() => setShowSaveModal(false)}
+            onSave={handleSaveDashboard}
+            isLoading={isSaving}
+          />
         </div>
       );
 
     case "bar":
       return (
         <div className={`w-full ${className}`}>
+          {renderSaveButton()}
           <ResponsiveContainer {...containerProps}>
             <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -137,12 +207,19 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
               <Bar dataKey={chartConfig.y} fill={CHART_COLORS[0]} />
             </BarChart>
           </ResponsiveContainer>
+          <SaveDashboardModal
+            isOpen={showSaveModal}
+            onClose={() => setShowSaveModal(false)}
+            onSave={handleSaveDashboard}
+            isLoading={isSaving}
+          />
         </div>
       );
 
     case "pie":
       return (
         <div className={`w-full ${className}`}>
+          {renderSaveButton()}
           <ResponsiveContainer {...containerProps}>
             <PieChart>
               <Pie
@@ -164,12 +241,29 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
               <Legend />
             </PieChart>
           </ResponsiveContainer>
+          <SaveDashboardModal
+            isOpen={showSaveModal}
+            onClose={() => setShowSaveModal(false)}
+            onSave={handleSaveDashboard}
+            isLoading={isSaving}
+          />
         </div>
       );
 
     case "table":
     default:
-      return <TableView data={data} className={className} />;
+      return (
+        <div className={`w-full ${className}`}>
+          {renderSaveButton()}
+          <TableView data={data} className="" />
+          <SaveDashboardModal
+            isOpen={showSaveModal}
+            onClose={() => setShowSaveModal(false)}
+            onSave={handleSaveDashboard}
+            isLoading={isSaving}
+          />
+        </div>
+      );
   }
 };
 
@@ -264,4 +358,5 @@ const TableView: React.FC<{ data: ChartData; className?: string }> = ({
   );
 };
 
+export { SaveDashboardModal };
 export default ChartRenderer;
