@@ -31,8 +31,11 @@ export function analyzeColumnTypes(
       type = "datetime";
     } else if (isNumericColumn(columnValues)) {
       type = "numeric";
-    } else if (uniqueValues.size <= Math.min(columnValues.length * 0.5, 50)) {
-      // If unique values are less than 50% of total values (and max 50), treat as categorical
+    } else if (
+      uniqueValues.size < columnValues.length &&
+      uniqueValues.size <= 50
+    ) {
+      // If unique values are less than total values (repeated values) and max 50, treat as categorical
       type = "categorical";
     } else {
       type = "text";
@@ -158,13 +161,13 @@ export function selectChartType(data: ChartData): ChartConfig {
     };
   }
 
-  // Rule 4: Line Chart fallback - If we have any time-like data and numeric data
+  // Rule 4: Line Chart fallback - If we have any numeric data and first column could be x-axis
   if (numericColumns.length >= 2) {
     // Check if first column could be treated as x-axis (even if not datetime)
     return {
       type: "line",
-      x: columns[0],
-      y: numericColumns[0].name,
+      x: numericColumns[0].name,
+      y: numericColumns[1].name,
     };
   }
 
