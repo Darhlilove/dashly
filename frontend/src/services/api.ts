@@ -13,6 +13,7 @@ interface RetryConfig {
   retries: number;
   retryDelay: number;
   retryCondition?: (error: AxiosError) => boolean;
+  onRetry?: (attempt: number, error: AxiosError) => void;
 }
 
 class ApiService {
@@ -67,67 +68,105 @@ class ApiService {
   }
 
   private handleError(error: AxiosError): ApiError {
+    const timestamp = new Date().toISOString();
+    const requestId =
+      error.response?.headers?.["x-request-id"] ||
+      error.config?.headers?.["x-request-id"] ||
+      `req_${Date.now()}`;
+
     if (error.response) {
       // Server responded with error status
       const responseData = error.response.data as any;
       const status = error.response.status;
 
       let message: string;
+      let retryable = false;
+      let code: string;
+
       switch (status) {
         case 400:
           message =
             responseData?.message ||
             responseData?.detail ||
             "Invalid request. Please check your input.";
+          code = "VALIDATION_ERROR";
+          retryable = false;
           break;
         case 401:
           message = "Authentication required. Please log in.";
+          code = "AUTHENTICATION_ERROR";
+          retryable = false;
           break;
         case 403:
           message =
             "Access denied. You don't have permission to perform this action.";
+          code = "AUTHORIZATION_ERROR";
+          retryable = false;
           break;
         case 404:
           message = "The requested resource was not found.";
+          code = "NOT_FOUND_ERROR";
+          retryable = false;
           break;
         case 413:
           message = "File too large. Please upload a smaller file.";
+          code = "FILE_TOO_LARGE";
+          retryable = false;
           break;
         case 415:
           message = "Unsupported file type. Please upload a CSV file.";
+          code = "INVALID_FILE_TYPE";
+          retryable = false;
           break;
         case 422:
           message =
             responseData?.message ||
             responseData?.detail ||
             "Invalid data format.";
+          code = "VALIDATION_ERROR";
+          retryable = false;
           break;
         case 429:
           message = "Too many requests. Please wait a moment and try again.";
+          code = "RATE_LIMIT_ERROR";
+          retryable = true;
           break;
         case 500:
           message = "Internal server error. Please try again later.";
+          code = "INTERNAL_ERROR";
+          retryable = true;
           break;
         case 502:
           message = "Service temporarily unavailable. Please try again.";
+          code = "SERVICE_UNAVAILABLE";
+          retryable = true;
           break;
         case 503:
           message = "Service unavailable. Please try again later.";
+          code = "SERVICE_UNAVAILABLE";
+          retryable = true;
           break;
         case 504:
           message = "Request timeout. Please try again.";
+          code = "TIMEOUT_ERROR";
+          retryable = true;
           break;
         default:
           message =
             responseData?.message ||
             responseData?.detail ||
             `Server error: ${status}`;
+          code = `HTTP_${status}`;
+          retryable = status >= 500;
       }
 
       return {
         message,
-        code: status.toString(),
+        code,
         details: error.response.data,
+        retryable,
+        timestamp,
+        requestId,
       };
     } else if (error.request) {
       // Request made but no response received
@@ -136,18 +175,28 @@ class ApiService {
           message:
             "Request timeout. Please check your connection and try again.",
           code: "TIMEOUT_ERROR",
+          retryable: true,
+          timestamp,
+          requestId,
         };
       }
+
       return {
         message:
           "Network error: Unable to connect to server. Please check your internet connection.",
         code: "NETWORK_ERROR",
+        retryable: true,
+        timestamp,
+        requestId,
       };
     } else {
       // Something else happened
       return {
         message: error.message || "An unexpected error occurred",
         code: "UNKNOWN_ERROR",
+        retryable: false,
+        timestamp,
+        requestId,
       };
     }
   }
@@ -180,6 +229,11 @@ class ApiService {
           !retryConfig.retryCondition(error as AxiosError)
         ) {
           break;
+        }
+
+        // Call retry callback if provided
+        if (retryConfig.onRetry) {
+          retryConfig.onRetry(attempt + 1, error as AxiosError);
         }
 
         // Wait before retrying with exponential backoff
