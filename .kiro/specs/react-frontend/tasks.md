@@ -30,7 +30,7 @@
   - Write unit tests for query input handling and API integration
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 5. Build SQLPreviewModal for SQL review and execution
+- [x] 5. Build SQLPreviewModal for SQL review and execution
 
   - Create modal component with overlay, generated SQL display, and action buttons
   - Implement editable SQL textarea with basic formatting
