@@ -6,22 +6,19 @@ import { apiService } from "../services/api";
 import LoadingSpinner from "./LoadingSpinner";
 
 interface SQLPreviewModalProps {
-  isOpen: boolean;
   sql: string;
+  onExecute: (sql: string) => void;
   onClose: () => void;
-  onExecuteSuccess: (results: ExecuteResponse) => void;
-  onExecuteError: (error: string) => void;
+  isLoading: boolean;
 }
 
 const SQLPreviewModal: React.FC<SQLPreviewModalProps> = ({
-  isOpen,
   sql,
+  onExecute,
   onClose,
-  onExecuteSuccess,
-  onExecuteError,
+  isLoading,
 }) => {
   const [editedSQL, setEditedSQL] = useState(sql);
-  const [isExecuting, setIsExecuting] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -32,22 +29,22 @@ const SQLPreviewModal: React.FC<SQLPreviewModalProps> = ({
 
   // Focus textarea when modal opens
   useEffect(() => {
-    if (isOpen && textareaRef.current) {
+    if (textareaRef.current) {
       textareaRef.current.focus();
     }
-  }, [isOpen]);
+  }, []);
 
   // Handle escape key to close modal
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && isOpen) {
+      if (event.key === "Escape") {
         onClose();
       }
     };
 
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [isOpen, onClose]);
+  }, [onClose]);
 
   // Handle click outside modal to close
   const handleOverlayClick = (event: React.MouseEvent) => {
@@ -57,24 +54,13 @@ const SQLPreviewModal: React.FC<SQLPreviewModalProps> = ({
   };
 
   // Execute SQL query
-  const handleRunQuery = async () => {
+  const handleRunQuery = () => {
     const trimmedSQL = editedSQL.trim();
     if (!trimmedSQL) {
-      onExecuteError("SQL query cannot be empty");
       return;
     }
 
-    setIsExecuting(true);
-    try {
-      const results = await apiService.executeSQL(trimmedSQL);
-      onExecuteSuccess(results);
-      onClose();
-    } catch (error) {
-      const apiError = error as ApiError;
-      onExecuteError(apiError.message || "Failed to execute SQL query");
-    } finally {
-      setIsExecuting(false);
-    }
+    onExecute(trimmedSQL);
   };
 
   // Handle SQL textarea change
@@ -94,12 +80,13 @@ const SQLPreviewModal: React.FC<SQLPreviewModalProps> = ({
     handleTextareaResize();
   }, [editedSQL]);
 
-  if (!isOpen) return null;
+
 
   return (
     <div
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
       onClick={handleOverlayClick}
+      data-testid="sql-modal"
     >
       <div
         ref={modalRef}
@@ -168,18 +155,19 @@ const SQLPreviewModal: React.FC<SQLPreviewModalProps> = ({
         <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
           <button
             onClick={onClose}
-            disabled={isExecuting}
+            disabled={isLoading}
             className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleRunQuery}
-            disabled={isExecuting}
+            disabled={isLoading}
             className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            data-testid="run-query-button"
           >
-            {isExecuting && <LoadingSpinner size="sm" />}
-            {isExecuting ? "Running Query..." : "Run Query"}
+            {isLoading && <LoadingSpinner size="sm" />}
+            {isLoading ? "Running Query..." : "Run Query"}
           </button>
         </div>
       </div>

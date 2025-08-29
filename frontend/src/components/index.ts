@@ -13,3 +13,4 @@ export {
   EmptyDashboardState,
   DashboardGridSkeleton,
 } from "./DashboardGrid";
+export { default as ErrorBoundary } from "./ErrorBoundary";

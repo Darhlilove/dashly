@@ -4,38 +4,33 @@ import { apiService } from '../services/api';
 import { ApiError } from '../types/api';
 
 interface QueryBoxProps {
-  onSQLGenerated: (sql: string, query: string) => void;
-  onError: (error: string) => void;
-  disabled?: boolean;
+  onSubmit: (query: string) => void;
+  isLoading: boolean;
+  placeholder?: string;
+  value?: string;
 }
 
 const QueryBox: React.FC<QueryBoxProps> = ({ 
-  onSQLGenerated, 
-  onError, 
-  disabled = false 
+  onSubmit,
+  isLoading,
+  placeholder = "Ask a question about your data...",
+  value = ""
 }) => {
-  const [query, setQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [query, setQuery] = useState(value);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Update internal state when value prop changes
+  React.useEffect(() => {
+    setQuery(value);
+  }, [value]);
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!query.trim() || isLoading || disabled) {
+    if (!query.trim() || isLoading) {
       return;
     }
 
-    setIsLoading(true);
-
-    try {
-      const response = await apiService.translateQuery(query.trim());
-      onSQLGenerated(response.sql, query.trim());
-      // Don't clear the query so user can see what they asked
-    } catch (error) {
-      const apiError = error as ApiError;
-      onError(apiError.message || 'Failed to translate query to SQL');
-    } finally {
-      setIsLoading(false);
-    }
+    onSubmit(query.trim());
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -46,7 +41,7 @@ const QueryBox: React.FC<QueryBoxProps> = ({
     }
   };
 
-  const isSubmitDisabled = !query.trim() || isLoading || disabled;
+  const isSubmitDisabled = !query.trim() || isLoading;
 
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
@@ -64,11 +59,12 @@ const QueryBox: React.FC<QueryBoxProps> = ({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="e.g., 'Show monthly revenue by region for the last 12 months' or 'What are the top 5 products by sales?'"
+            placeholder={placeholder}
             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-colors"
             rows={3}
-            disabled={isLoading || disabled}
+            disabled={isLoading}
             aria-describedby="query-help"
+            data-testid="query-input"
           />
           <p id="query-help" className="mt-2 text-sm text-gray-500">
             Describe what you want to see in plain English. Press Ctrl+Enter to generate.
@@ -80,6 +76,7 @@ const QueryBox: React.FC<QueryBoxProps> = ({
             type="submit"
             disabled={isSubmitDisabled}
             className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
+            data-testid="generate-button"
           >
             {isLoading && <LoadingSpinner size="sm" />}
             {isLoading ? 'Generating...' : 'Generate'}

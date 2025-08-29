@@ -28,8 +28,8 @@ interface ChartRendererProps {
   className?: string;
   question?: string;
   sql?: string;
-  onSaveSuccess?: (dashboard: Dashboard) => void;
-  onSaveError?: (error: string) => void;
+  onSaveDashboard?: (name: string) => void;
+  isLoading?: boolean;
 }
 
 // Color palette for charts
@@ -56,11 +56,10 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
   className = "",
   question,
   sql,
-  onSaveSuccess,
-  onSaveError,
+  onSaveDashboard,
+  isLoading = false,
 }) => {
   const [showSaveModal, setShowSaveModal] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   // Use provided config or automatically select chart type
   const chartConfig = config || selectChartType(data);
 
@@ -76,34 +75,13 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
   }
 
   // Handle dashboard save
-  const handleSaveDashboard = async (name: string) => {
-    if (!question || !sql) {
-      onSaveError?.("Missing question or SQL query for dashboard save");
-      setShowSaveModal(false);
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      const dashboard = await apiService.saveDashboard({
-        name,
-        question,
-        sql,
-        chartConfig,
-      });
-      
-      onSaveSuccess?.(dashboard);
-      setShowSaveModal(false);
-    } catch (error: any) {
-      const errorMessage = error.message || "Failed to save dashboard";
-      onSaveError?.(errorMessage);
-    } finally {
-      setIsSaving(false);
-    }
+  const handleSaveDashboard = (name: string) => {
+    onSaveDashboard?.(name);
+    setShowSaveModal(false);
   };
 
   // Check if save functionality is available
-  const canSave = Boolean(question && sql);
+  const canSave = Boolean(onSaveDashboard);
 
   // Transform data for chart rendering
   const chartData = transformDataForChart(data, chartConfig);
@@ -128,7 +106,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
       <div className="flex justify-end mb-4">
         <button
           onClick={() => setShowSaveModal(true)}
-          disabled={isSaving}
+          disabled={isLoading}
           className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
         >
           <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -182,7 +160,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
             isOpen={showSaveModal}
             onClose={() => setShowSaveModal(false)}
             onSave={handleSaveDashboard}
-            isLoading={isSaving}
+            isLoading={isLoading}
           />
         </div>
       );
@@ -211,7 +189,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
             isOpen={showSaveModal}
             onClose={() => setShowSaveModal(false)}
             onSave={handleSaveDashboard}
-            isLoading={isSaving}
+            isLoading={isLoading}
           />
         </div>
       );
@@ -245,7 +223,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
             isOpen={showSaveModal}
             onClose={() => setShowSaveModal(false)}
             onSave={handleSaveDashboard}
-            isLoading={isSaving}
+            isLoading={isLoading}
           />
         </div>
       );
@@ -260,7 +238,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
             isOpen={showSaveModal}
             onClose={() => setShowSaveModal(false)}
             onSave={handleSaveDashboard}
-            isLoading={isSaving}
+            isLoading={isLoading}
           />
         </div>
       );

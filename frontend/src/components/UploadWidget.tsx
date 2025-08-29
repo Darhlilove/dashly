@@ -4,35 +4,38 @@ import { UploadResponse, ApiError } from '../types/api';
 import LoadingSpinner from './LoadingSpinner';
 
 interface UploadWidgetProps {
-  onUploadSuccess: (response: UploadResponse) => void;
-  onUploadError: (error: string) => void;
+  onFileUpload: (file: File) => void;
+  onDemoData: () => void;
+  isLoading: boolean;
+  error: string | null;
 }
 
 const UploadWidget: React.FC<UploadWidgetProps> = ({
-  onUploadSuccess,
-  onUploadError,
+  onFileUpload,
+  onDemoData,
+  isLoading,
+  error,
 }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = useCallback((file: File) => {
     // Validate file type
     if (!file.type.includes('csv') && !file.name.toLowerCase().endsWith('.csv')) {
-      onUploadError('Please select a CSV file');
+      // Error handling is now done by parent component
       return;
     }
 
     // Validate file size (10MB limit)
     const maxSize = 10 * 1024 * 1024; // 10MB
     if (file.size > maxSize) {
-      onUploadError('File size must be less than 10MB');
+      // Error handling is now done by parent component
       return;
     }
 
     setSelectedFile(file);
-  }, [onUploadError]);
+  }, []);
 
   const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -61,32 +64,13 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
     }
   };
 
-  const handleUploadFile = async () => {
+  const handleUploadFile = () => {
     if (!selectedFile) return;
-
-    setIsUploading(true);
-    try {
-      const response = await apiService.uploadFile(selectedFile);
-      onUploadSuccess(response);
-    } catch (error) {
-      const apiError = error as ApiError;
-      onUploadError(apiError.message || 'Failed to upload file');
-    } finally {
-      setIsUploading(false);
-    }
+    onFileUpload(selectedFile);
   };
 
-  const handleUseDemoData = async () => {
-    setIsUploading(true);
-    try {
-      const response = await apiService.useDemoData();
-      onUploadSuccess(response);
-    } catch (error) {
-      const apiError = error as ApiError;
-      onUploadError(apiError.message || 'Failed to load demo data');
-    } finally {
-      setIsUploading(false);
-    }
+  const handleUseDemoData = () => {
+    onDemoData();
   };
 
   const handleBrowseFiles = () => {
@@ -101,7 +85,7 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto p-6">
+    <div className="w-full max-w-2xl mx-auto p-6" data-testid="upload-widget">
       <div className="text-center mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
           Welcome to dashly
@@ -119,7 +103,7 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
             ? 'border-blue-400 bg-blue-50' 
             : 'border-gray-300 hover:border-gray-400'
           }
-          ${isUploading ? 'pointer-events-none opacity-50' : ''}
+          ${isLoading ? 'pointer-events-none opacity-50' : ''}
         `}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -136,7 +120,7 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
           data-testid="file-input"
         />
 
-        {isUploading ? (
+        {isLoading ? (
           <div className="flex flex-col items-center">
             <LoadingSpinner size="lg" className="mb-4" />
             <p className="text-gray-600">
@@ -231,7 +215,7 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
         <div className="mt-6">
           <button
             onClick={handleUseDemoData}
-            disabled={isUploading}
+            disabled={isLoading}
             className="px-8 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="demo-data-button"
           >
@@ -241,6 +225,13 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
             Try dashly with sample sales data
           </p>
         </div>
+
+        {/* Error Display */}
+        {error && (
+          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-sm text-red-600">{error}</p>
+          </div>
+        )}
       </div>
     </div>
   );

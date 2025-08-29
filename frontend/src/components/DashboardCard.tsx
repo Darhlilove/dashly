@@ -74,6 +74,7 @@ export const DashboardCard: React.FC<DashboardCardProps> = ({
         }
       }}
       aria-label={`Load dashboard: ${dashboard.name}`}
+      data-testid={`dashboard-card-${dashboard.id}`}
     >
       {/* Header */}
       <div className="mb-3">
