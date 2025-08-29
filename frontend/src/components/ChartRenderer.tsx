@@ -204,7 +204,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
               <YAxis tick={{ fontSize: 12 }} />
               <Tooltip />
               <Legend />
-              <Bar dataKey={chartConfig.y} fill={CHART_COLORS[0]} />
+              <Bar dataKey={chartConfig.y || "value"} fill={CHART_COLORS[0]} />
             </BarChart>
           </ResponsiveContainer>
           <SaveDashboardModal
@@ -230,8 +230,8 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
                 label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                 outerRadius={Math.min(height * 0.35, 120)}
                 fill="#8884d8"
-                dataKey={chartConfig.y}
-                nameKey={chartConfig.x}
+                dataKey={chartConfig.y || "value"}
+                nameKey={chartConfig.x || "name"}
               >
                 {chartData.map((_, index) => (
                   <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChartConfig, ChartData } from '../types';
+
 
 interface SaveDashboardModalProps {
   isOpen: boolean;
