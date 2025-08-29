@@ -173,7 +173,7 @@ function App() {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
-      const response = await apiService.executeSQL(sql);
+      const response = await apiService.executeSQL(sql, state.currentQuery);
       const chartConfig = selectChartType({
         columns: response.columns,
         rows: response.rows,
@@ -236,7 +236,10 @@ function App() {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
-      const response = await apiService.executeSQL(dashboard.sql);
+      const response = await apiService.executeSQL(
+        dashboard.sql,
+        dashboard.question
+      );
 
       setState((prev) => ({
         ...prev,

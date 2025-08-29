@@ -3,6 +3,9 @@
 // Export chart selection utilities
 export * from "./chartSelector";
 
+// Export cache utilities
+export * from "./cache";
+
 // Generate unique IDs for components
 export function generateId(): string {
   return Math.random().toString(36).substr(2, 9);

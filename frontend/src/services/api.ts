@@ -8,6 +8,7 @@ import {
   ApiError,
 } from "../types/api";
 import { Dashboard } from "../types/dashboard";
+import { sessionCache } from "../utils/cache";
 
 interface RetryConfig {
   retries: number;
@@ -328,13 +329,22 @@ class ApiService {
     });
   }
 
-  // Execute SQL query with retry logic
-  async executeSQL(sql: string): Promise<ExecuteResponse> {
+  // Execute SQL query with retry logic and caching
+  async executeSQL(sql: string, question?: string): Promise<ExecuteResponse> {
     if (!sql.trim()) {
       throw {
         message: "SQL query cannot be empty.",
         code: "EMPTY_SQL",
       } as ApiError;
+    }
+
+    // Check cache first if we have a question context
+    if (question) {
+      const cached = sessionCache.getCachedQueryResult(sql, question);
+      if (cached) {
+        console.log("Using cached query result");
+        return cached;
+      }
     }
 
     return this.retryRequest(async () => {
@@ -347,6 +357,11 @@ class ApiService {
           timeout: 60000, // Longer timeout for complex queries
         }
       );
+
+      // Cache the result if we have question context
+      if (question) {
+        sessionCache.cacheQueryResult(sql, question, response.data);
+      }
 
       return response.data;
     });
@@ -369,14 +384,28 @@ class ApiService {
         dashboard
       );
 
+      // Clear dashboard cache since we have new data
+      sessionCache.clearDashboardCache();
+
       return response.data;
     });
   }
 
-  // Get saved dashboards with retry logic
+  // Get saved dashboards with retry logic and caching
   async getDashboards(): Promise<Dashboard[]> {
+    // Check cache first
+    const cached = sessionCache.getCachedDashboards();
+    if (cached) {
+      console.log("Using cached dashboards");
+      return cached;
+    }
+
     return this.retryRequest(async () => {
       const response = await this.client.get<Dashboard[]>("/dashboards");
+
+      // Cache the result
+      sessionCache.cacheDashboards(response.data);
+
       return response.data;
     });
   }

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { LoadingSpinner } from './';
+import React, { useState, useCallback, useMemo } from "react";
+import { LoadingSpinner } from "./";
+import { debounce } from "../utils";
 
 interface QueryBoxProps {
   onSubmit: (query: string) => void;
@@ -8,22 +9,39 @@ interface QueryBoxProps {
   value?: string;
 }
 
-const QueryBox: React.FC<QueryBoxProps> = ({ 
+const QueryBox: React.FC<QueryBoxProps> = ({
   onSubmit,
   isLoading,
   placeholder = "Ask a question about your data...",
-  value = ""
+  value = "",
 }) => {
   const [query, setQuery] = useState(value);
+  const [isTyping, setIsTyping] = useState(false);
 
   // Update internal state when value prop changes
   React.useEffect(() => {
     setQuery(value);
   }, [value]);
 
+  // Debounced function to handle typing indicator
+  const debouncedTypingEnd = useMemo(
+    () => debounce(() => setIsTyping(false), 1000),
+    []
+  );
+
+  // Handle query input changes with debouncing
+  const handleQueryChange = useCallback(
+    (newQuery: string) => {
+      setQuery(newQuery);
+      setIsTyping(true);
+      debouncedTypingEnd();
+    },
+    [debouncedTypingEnd]
+  );
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!query.trim() || isLoading) {
       return;
     }
@@ -33,7 +51,7 @@ const QueryBox: React.FC<QueryBoxProps> = ({
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Allow Ctrl+Enter or Cmd+Enter to submit
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
       handleSubmit(e as any);
     }
@@ -46,7 +64,7 @@ const QueryBox: React.FC<QueryBoxProps> = ({
       <h2 className="text-lg sm:text-xl font-semibold text-gray-900 mb-4">
         Ask a Question About Your Data
       </h2>
-      
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label htmlFor="query-input" className="sr-only">
@@ -55,7 +73,7 @@ const QueryBox: React.FC<QueryBoxProps> = ({
           <textarea
             id="query-input"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => handleQueryChange(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
             className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-colors text-sm sm:text-base"
@@ -65,7 +83,13 @@ const QueryBox: React.FC<QueryBoxProps> = ({
             data-testid="query-input"
           />
           <p id="query-help" className="mt-2 text-xs sm:text-sm text-gray-500">
-            Describe what you want to see in plain English. Press Ctrl+Enter to generate.
+            Describe what you want to see in plain English. Press Ctrl+Enter to
+            generate.
+            {isTyping && (
+              <span className="ml-2 text-blue-500">
+                <span className="inline-block animate-pulse">●</span> Typing...
+              </span>
+            )}
           </p>
         </div>
 
@@ -78,7 +102,7 @@ const QueryBox: React.FC<QueryBoxProps> = ({
             aria-describedby={isLoading ? "generating-status" : undefined}
           >
             {isLoading && <LoadingSpinner size="sm" />}
-            <span>{isLoading ? 'Generating...' : 'Generate'}</span>
+            <span>{isLoading ? "Generating..." : "Generate"}</span>
           </button>
           {isLoading && (
             <span id="generating-status" className="sr-only">
@@ -89,7 +113,11 @@ const QueryBox: React.FC<QueryBoxProps> = ({
       </form>
 
       {query.trim() && !isLoading && (
-        <div className="mt-4 p-3 bg-gray-50 rounded-lg" role="status" aria-live="polite">
+        <div
+          className="mt-4 p-3 bg-gray-50 rounded-lg"
+          role="status"
+          aria-live="polite"
+        >
           <p className="text-xs sm:text-sm text-gray-600">
             <strong>Your question:</strong> {query}
           </p>
