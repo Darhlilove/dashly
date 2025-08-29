@@ -58,7 +58,7 @@
   - Write unit tests for dashboard saving workflow
   - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
 
-- [ ] 8. Build DashboardCard component for saved dashboards
+- [x] 8. Build DashboardCard component for saved dashboards
 
   - Create DashboardCard component with title display and mini-chart preview
   - Implement click-to-load functionality that restores saved dashboard state
