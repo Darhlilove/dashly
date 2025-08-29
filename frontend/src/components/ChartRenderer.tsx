@@ -17,8 +17,6 @@ import {
 import { ChartConfig, ChartData } from "../types";
 import { selectChartType, validateChartConfig } from "../utils/chartSelector";
 import SaveDashboardModal from "./SaveDashboardModal";
-import { apiService } from "../services/api";
-import { Dashboard } from "../types/dashboard";
 
 interface ChartRendererProps {
   data: ChartData;
@@ -26,8 +24,6 @@ interface ChartRendererProps {
   width?: number;
   height?: number;
   className?: string;
-  question?: string;
-  sql?: string;
   onSaveDashboard?: (name: string) => void;
   isLoading?: boolean;
 }
@@ -54,8 +50,6 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
   width,
   height = 400,
   className = "",
-  question,
-  sql,
   onSaveDashboard,
   isLoading = false,
 }) => {
@@ -107,12 +101,14 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
         <button
           onClick={() => setShowSaveModal(true)}
           disabled={isLoading}
-          className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
+          className="px-3 sm:px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
+          aria-label="Save current dashboard configuration"
         >
-          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12" />
           </svg>
-          Save Dashboard
+          <span className="hidden sm:inline">Save Dashboard</span>
+          <span className="sm:hidden">Save</span>
         </button>
       </div>
     );
@@ -121,41 +117,44 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
   switch (chartConfig.type) {
     case "line":
       return (
-        <div className={`w-full ${className}`}>
+        <div className={`w-full ${className}`} role="img" aria-label={`Line chart showing ${chartConfig.y} over ${chartConfig.x}`}>
           {renderSaveButton()}
-          <ResponsiveContainer {...containerProps}>
-            <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis 
-                dataKey={chartConfig.x} 
-                tick={{ fontSize: 12 }}
-                angle={-45}
-                textAnchor="end"
-                height={60}
-              />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Legend />
-              <Line
-                type="monotone"
-                dataKey={chartConfig.y}
-                stroke={CHART_COLORS[0]}
-                strokeWidth={2}
-                dot={{ r: 4 }}
-                activeDot={{ r: 6 }}
-              />
-              {chartConfig.groupBy && (
+          <div className="bg-white rounded-lg border border-gray-200 p-2 sm:p-4">
+            <ResponsiveContainer {...containerProps}>
+              <LineChart data={chartData} margin={{ top: 5, right: 15, left: 10, bottom: 40 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis 
+                  dataKey={chartConfig.x} 
+                  tick={{ fontSize: 10 }}
+                  angle={-45}
+                  textAnchor="end"
+                  height={60}
+                  interval={0}
+                />
+                <YAxis tick={{ fontSize: 10 }} />
+                <Tooltip />
+                <Legend />
                 <Line
                   type="monotone"
-                  dataKey={chartConfig.groupBy}
-                  stroke={CHART_COLORS[1]}
+                  dataKey={chartConfig.y}
+                  stroke={CHART_COLORS[0]}
                   strokeWidth={2}
-                  dot={{ r: 4 }}
-                  activeDot={{ r: 6 }}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
                 />
-              )}
-            </LineChart>
-          </ResponsiveContainer>
+                {chartConfig.groupBy && (
+                  <Line
+                    type="monotone"
+                    dataKey={chartConfig.groupBy}
+                    stroke={CHART_COLORS[1]}
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    activeDot={{ r: 5 }}
+                  />
+                )}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
           <SaveDashboardModal
             isOpen={showSaveModal}
             onClose={() => setShowSaveModal(false)}
@@ -167,24 +166,27 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
 
     case "bar":
       return (
-        <div className={`w-full ${className}`}>
+        <div className={`w-full ${className}`} role="img" aria-label={`Bar chart showing ${chartConfig.y || "value"} by ${chartConfig.x}`}>
           {renderSaveButton()}
-          <ResponsiveContainer {...containerProps}>
-            <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis 
-                dataKey={chartConfig.x} 
-                tick={{ fontSize: 12 }}
-                angle={-45}
-                textAnchor="end"
-                height={60}
-              />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey={chartConfig.y || "value"} fill={CHART_COLORS[0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="bg-white rounded-lg border border-gray-200 p-2 sm:p-4">
+            <ResponsiveContainer {...containerProps}>
+              <BarChart data={chartData} margin={{ top: 5, right: 15, left: 10, bottom: 40 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis 
+                  dataKey={chartConfig.x} 
+                  tick={{ fontSize: 10 }}
+                  angle={-45}
+                  textAnchor="end"
+                  height={60}
+                  interval={0}
+                />
+                <YAxis tick={{ fontSize: 10 }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey={chartConfig.y || "value"} fill={CHART_COLORS[0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
           <SaveDashboardModal
             isOpen={showSaveModal}
             onClose={() => setShowSaveModal(false)}
@@ -196,29 +198,31 @@ export const ChartRenderer: React.FC<ChartRendererProps> = ({
 
     case "pie":
       return (
-        <div className={`w-full ${className}`}>
+        <div className={`w-full ${className}`} role="img" aria-label={`Pie chart showing distribution of ${chartConfig.y || "value"} by ${chartConfig.x || "category"}`}>
           {renderSaveButton()}
-          <ResponsiveContainer {...containerProps}>
-            <PieChart>
-              <Pie
-                data={chartData}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                outerRadius={Math.min(height * 0.35, 120)}
-                fill="#8884d8"
-                dataKey={chartConfig.y || "value"}
-                nameKey={chartConfig.x || "name"}
-              >
-                {chartData.map((_, index) => (
-                  <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
+          <div className="bg-white rounded-lg border border-gray-200 p-2 sm:p-4">
+            <ResponsiveContainer {...containerProps}>
+              <PieChart>
+                <Pie
+                  data={chartData}
+                  cx="50%"
+                  cy="50%"
+                  labelLine={false}
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  outerRadius={Math.min(height * 0.3, 100)}
+                  fill="#8884d8"
+                  dataKey={chartConfig.y || "value"}
+                  nameKey={chartConfig.x || "name"}
+                >
+                  {chartData.map((_, index) => (
+                    <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
           <SaveDashboardModal
             isOpen={showSaveModal}
             onClose={() => setShowSaveModal(false)}
@@ -291,44 +295,47 @@ const TableView: React.FC<{ data: ChartData; className?: string }> = ({
 
   if (rows.length === 0) {
     return (
-      <div className={`p-4 text-center text-gray-500 ${className}`}>
+      <div className={`p-4 text-center text-gray-500 ${className}`} role="status">
         No data to display
       </div>
     );
   }
 
   return (
-    <div className={`overflow-x-auto ${className}`}>
-      <table className="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg">
-        <thead className="bg-gray-50">
-          <tr>
-            {columns.map((column) => (
-              <th
-                key={column}
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-              >
-                {column}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
-          {rows.slice(0, 100).map((row, rowIndex) => (
-            <tr key={rowIndex} className="hover:bg-gray-50">
-              {row.map((cell, cellIndex) => (
-                <td
-                  key={cellIndex}
-                  className="px-6 py-4 whitespace-nowrap text-sm text-gray-900"
+    <div className={`bg-white rounded-lg border border-gray-200 ${className}`}>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200" role="table" aria-label="Data table">
+          <thead className="bg-gray-50">
+            <tr>
+              {columns.map((column) => (
+                <th
+                  key={column}
+                  scope="col"
+                  className="px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                 >
-                  {cell?.toString() || ""}
-                </td>
+                  {column}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {rows.slice(0, 100).map((row, rowIndex) => (
+              <tr key={rowIndex} className="hover:bg-gray-50">
+                {row.map((cell, cellIndex) => (
+                  <td
+                    key={cellIndex}
+                    className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900"
+                  >
+                    {cell?.toString() || ""}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {rows.length > 100 && (
-        <div className="p-4 text-center text-gray-500 text-sm">
+        <div className="p-4 text-center text-gray-500 text-sm border-t border-gray-200" role="status">
           Showing first 100 rows of {rows.length} total rows
         </div>
       )}

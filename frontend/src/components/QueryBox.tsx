@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
 import { LoadingSpinner } from './';
-import { apiService } from '../services/api';
-import { ApiError } from '../types/api';
 
 interface QueryBoxProps {
   onSubmit: (query: string) => void;
@@ -44,8 +42,8 @@ const QueryBox: React.FC<QueryBoxProps> = ({
   const isSubmitDisabled = !query.trim() || isLoading;
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
-      <h2 className="text-xl font-semibold text-gray-900 mb-4">
+    <div className="bg-white rounded-lg shadow-md p-4 sm:p-6">
+      <h2 className="text-lg sm:text-xl font-semibold text-gray-900 mb-4">
         Ask a Question About Your Data
       </h2>
       
@@ -60,13 +58,13 @@ const QueryBox: React.FC<QueryBoxProps> = ({
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-colors"
+            className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none transition-colors text-sm sm:text-base"
             rows={3}
             disabled={isLoading}
             aria-describedby="query-help"
             data-testid="query-input"
           />
-          <p id="query-help" className="mt-2 text-sm text-gray-500">
+          <p id="query-help" className="mt-2 text-xs sm:text-sm text-gray-500">
             Describe what you want to see in plain English. Press Ctrl+Enter to generate.
           </p>
         </div>
@@ -75,18 +73,24 @@ const QueryBox: React.FC<QueryBoxProps> = ({
           <button
             type="submit"
             disabled={isSubmitDisabled}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
+            className="px-4 sm:px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors text-sm sm:text-base"
             data-testid="generate-button"
+            aria-describedby={isLoading ? "generating-status" : undefined}
           >
             {isLoading && <LoadingSpinner size="sm" />}
-            {isLoading ? 'Generating...' : 'Generate'}
+            <span>{isLoading ? 'Generating...' : 'Generate'}</span>
           </button>
+          {isLoading && (
+            <span id="generating-status" className="sr-only">
+              Generating SQL query from your question
+            </span>
+          )}
         </div>
       </form>
 
       {query.trim() && !isLoading && (
-        <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-          <p className="text-sm text-gray-600">
+        <div className="mt-4 p-3 bg-gray-50 rounded-lg" role="status" aria-live="polite">
+          <p className="text-xs sm:text-sm text-gray-600">
             <strong>Your question:</strong> {query}
           </p>
         </div>

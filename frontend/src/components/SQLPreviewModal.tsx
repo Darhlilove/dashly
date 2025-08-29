@@ -1,8 +1,6 @@
 // SQLPreviewModal component for SQL review and execution
 
 import React, { useState, useEffect, useRef } from "react";
-import { ExecuteResponse, ApiError } from "../types/api";
-import { apiService } from "../services/api";
 import LoadingSpinner from "./LoadingSpinner";
 
 interface SQLPreviewModalProps {
@@ -93,24 +91,25 @@ const SQLPreviewModal: React.FC<SQLPreviewModalProps> = ({
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
-        className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col"
+        className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col mx-4"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h2 id="modal-title" className="text-xl font-semibold text-gray-900">
+        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200">
+          <h2 id="modal-title" className="text-lg sm:text-xl font-semibold text-gray-900">
             Review Generated SQL
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
+            className="text-gray-400 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded-md transition-colors p-1"
             aria-label="Close modal"
           >
             <svg
-              className="w-6 h-6"
+              className="w-5 h-5 sm:w-6 sm:h-6"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
+              aria-hidden="true"
             >
               <path
                 strokeLinecap="round"
@@ -123,7 +122,7 @@ const SQLPreviewModal: React.FC<SQLPreviewModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div className="flex-1 p-6 overflow-hidden">
+        <div className="flex-1 p-4 sm:p-6 overflow-hidden">
           <div className="mb-4">
             <label
               htmlFor="sql-textarea"
@@ -137,13 +136,14 @@ const SQLPreviewModal: React.FC<SQLPreviewModalProps> = ({
               value={editedSQL}
               onChange={handleSQLChange}
               onInput={handleTextareaResize}
-              className="w-full min-h-[200px] max-h-[400px] p-4 border border-gray-300 rounded-lg font-mono text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full min-h-[150px] sm:min-h-[200px] max-h-[300px] sm:max-h-[400px] p-3 sm:p-4 border border-gray-300 rounded-lg font-mono text-xs sm:text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="Enter your SQL query here..."
               spellCheck={false}
+              aria-describedby="sql-help"
             />
           </div>
 
-          <div className="text-xs text-gray-500 mb-4">
+          <div id="sql-help" className="text-xs text-gray-500 mb-4">
             <p>
               <strong>Note:</strong> Only SELECT statements are allowed. The
               query will be validated before execution.
@@ -152,23 +152,29 @@ const SQLPreviewModal: React.FC<SQLPreviewModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-200">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3 p-4 sm:p-6 border-t border-gray-200">
           <button
             onClick={onClose}
             disabled={isLoading}
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors order-2 sm:order-1"
           >
             Cancel
           </button>
           <button
             onClick={handleRunQuery}
-            disabled={isLoading}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            disabled={isLoading || !editedSQL.trim()}
+            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 order-1 sm:order-2"
             data-testid="run-query-button"
+            aria-describedby={isLoading ? "query-running-status" : undefined}
           >
             {isLoading && <LoadingSpinner size="sm" />}
-            {isLoading ? "Running Query..." : "Run Query"}
+            <span>{isLoading ? "Running Query..." : "Run Query"}</span>
           </button>
+          {isLoading && (
+            <span id="query-running-status" className="sr-only">
+              Executing SQL query, please wait
+            </span>
+          )}
         </div>
       </div>
     </div>

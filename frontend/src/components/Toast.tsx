@@ -68,18 +68,18 @@ const Toast: React.FC<ToastProps> = ({ notification, onDismiss }) => {
   };
 
   return (
-    <div className={getToastStyles()}>
+    <div className={getToastStyles()} role="alert">
       {getIcon()}
-      <div className="flex-1">
-        <p className="text-sm font-medium">{notification.message}</p>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs sm:text-sm font-medium break-words">{notification.message}</p>
       </div>
       <button
         onClick={handleDismiss}
-        className="ml-4 text-gray-400 hover:text-gray-600 transition-colors"
+        className="ml-3 sm:ml-4 text-gray-400 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 rounded-md transition-colors flex-shrink-0 p-1"
         aria-label="Dismiss notification"
         data-testid="toast-dismiss"
       >
-        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
           <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
         </svg>
       </button>
@@ -99,7 +99,12 @@ export const ToastContainer: React.FC<ToastContainerProps> = ({
   if (notifications.length === 0) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-50 max-w-sm w-full">
+    <div 
+      className="fixed top-4 right-4 z-50 max-w-sm w-full px-4 sm:px-0"
+      role="region"
+      aria-label="Notifications"
+      aria-live="polite"
+    >
       {notifications.map((notification) => (
         <Toast
           key={notification.id}

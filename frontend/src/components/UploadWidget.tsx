@@ -1,6 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { apiService } from '../services/api';
-import { UploadResponse, ApiError } from '../types/api';
+
 import LoadingSpinner from './LoadingSpinner';
 
 interface UploadWidgetProps {
@@ -85,20 +84,12 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto p-6" data-testid="upload-widget">
-      <div className="text-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          Welcome to dashly
-        </h1>
-        <p className="text-gray-600">
-          Upload your CSV data or use demo data to get started
-        </p>
-      </div>
+    <div className="w-full max-w-2xl mx-auto p-4 sm:p-6" data-testid="upload-widget">
 
       {/* File Upload Area */}
       <div
         className={`
-          relative border-2 border-dashed rounded-lg p-8 text-center transition-colors
+          relative border-2 border-dashed rounded-lg p-4 sm:p-6 lg:p-8 text-center transition-colors
           ${isDragOver 
             ? 'border-blue-400 bg-blue-50' 
             : 'border-gray-300 hover:border-gray-400'
@@ -109,6 +100,8 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         data-testid="upload-dropzone"
+        role="region"
+        aria-label="File upload area"
       >
         <input
           ref={fileInputRef}
@@ -123,18 +116,19 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
         {isLoading ? (
           <div className="flex flex-col items-center">
             <LoadingSpinner size="lg" className="mb-4" />
-            <p className="text-gray-600">
+            <p className="text-sm sm:text-base text-gray-600">
               {selectedFile ? 'Uploading file...' : 'Loading demo data...'}
             </p>
           </div>
         ) : selectedFile ? (
           <div className="flex flex-col items-center">
-            <div className="flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4">
+            <div className="flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-green-100 rounded-full mb-4">
               <svg
-                className="w-8 h-8 text-green-600"
+                className="w-6 h-6 sm:w-8 sm:h-8 text-green-600"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
+                aria-hidden="true"
               >
                 <path
                   strokeLinecap="round"
@@ -144,37 +138,43 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
                 />
               </svg>
             </div>
-            <p className="text-lg font-medium text-gray-900 mb-2">
+            <p className="text-base sm:text-lg font-medium text-gray-900 mb-2 text-center">
               {selectedFile.name}
             </p>
             <p className="text-sm text-gray-500 mb-4">
               {(selectedFile.size / 1024).toFixed(1)} KB
             </p>
-            <div className="flex space-x-3">
+            <div className="flex flex-col sm:flex-row gap-3 sm:space-x-3 w-full sm:w-auto">
               <button
                 onClick={handleUploadFile}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                className="px-4 sm:px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors font-medium"
                 data-testid="upload-button"
+                aria-describedby="upload-help"
               >
                 Upload File
               </button>
               <button
                 onClick={clearSelectedFile}
-                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+                className="px-4 sm:px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors font-medium"
                 data-testid="clear-file-button"
+                aria-label="Clear selected file"
               >
                 Clear
               </button>
             </div>
+            <p id="upload-help" className="sr-only">
+              Click Upload File to process your CSV data
+            </p>
           </div>
         ) : (
           <div className="flex flex-col items-center">
-            <div className="flex items-center justify-center w-16 h-16 bg-gray-100 rounded-full mb-4">
+            <div className="flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-gray-100 rounded-full mb-4">
               <svg
-                className="w-8 h-8 text-gray-400"
+                className="w-6 h-6 sm:w-8 sm:h-8 text-gray-400"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
+                aria-hidden="true"
               >
                 <path
                   strokeLinecap="round"
@@ -184,27 +184,31 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
                 />
               </svg>
             </div>
-            <p className="text-lg font-medium text-gray-900 mb-2">
+            <p className="text-base sm:text-lg font-medium text-gray-900 mb-2 text-center">
               Drop your CSV file here
             </p>
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="text-sm text-gray-500 mb-4 text-center">
               or click to browse files
             </p>
             <button
               onClick={handleBrowseFiles}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+              className="px-4 sm:px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors font-medium"
               data-testid="browse-files-button"
+              aria-describedby="file-requirements"
             >
               Browse Files
             </button>
+            <p id="file-requirements" className="text-xs text-gray-500 mt-2 text-center">
+              CSV files up to 10MB supported
+            </p>
           </div>
         )}
       </div>
 
       {/* Demo Data Section */}
-      <div className="mt-8 text-center">
+      <div className="mt-6 sm:mt-8 text-center">
         <div className="relative">
-          <div className="absolute inset-0 flex items-center">
+          <div className="absolute inset-0 flex items-center" aria-hidden="true">
             <div className="w-full border-t border-gray-300" />
           </div>
           <div className="relative flex justify-center text-sm">
@@ -216,19 +220,24 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
           <button
             onClick={handleUseDemoData}
             disabled={isLoading}
-            className="px-8 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-6 sm:px-8 py-2 sm:py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             data-testid="demo-data-button"
+            aria-describedby="demo-data-description"
           >
             Use Demo Data
           </button>
-          <p className="text-xs text-gray-500 mt-2">
+          <p id="demo-data-description" className="text-xs text-gray-500 mt-2">
             Try dashly with sample sales data
           </p>
         </div>
 
         {/* Error Display */}
         {error && (
-          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <div 
+            className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg"
+            role="alert"
+            aria-live="polite"
+          >
             <p className="text-sm text-red-600">{error}</p>
           </div>
         )}
