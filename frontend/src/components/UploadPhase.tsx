@@ -25,14 +25,6 @@ const UploadPhase: React.FC<UploadPhaseProps> = ({
   return (
     <div className="space-y-6 sm:space-y-8">
       <section aria-labelledby="upload-section">
-        <div className="text-center mb-6">
-          <h2 id="upload-section" className="text-xl sm:text-2xl font-semibold text-gray-900 mb-2">
-            Get Started
-          </h2>
-          <p className="text-sm sm:text-base text-gray-600">
-            Upload your CSV data or use demo data to create dashboards
-          </p>
-        </div>
         <UploadWidget
           onFileUpload={onFileUpload}
           onDemoData={onDemoData}

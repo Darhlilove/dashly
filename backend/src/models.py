@@ -155,3 +155,31 @@ class ValidationResult(BaseModel):
     warnings: List[str]
     parsed_query: Optional[ParsedQuery] = None
     security_violations: List[SecurityViolation] = []
+
+
+# Dashboard Models
+class ChartConfig(BaseModel):
+    """Chart configuration for dashboard visualization."""
+    type: str  # "bar", "line", "pie", "table"
+    x_axis: Optional[str] = None
+    y_axis: Optional[str] = None
+    title: Optional[str] = None
+    color_scheme: Optional[str] = None
+
+
+class DashboardRequest(BaseModel):
+    """Request model for creating/updating dashboards."""
+    name: str
+    question: str
+    sql: str
+    chartConfig: ChartConfig
+
+
+class Dashboard(BaseModel):
+    """Dashboard model for API responses."""
+    id: str
+    name: str
+    question: str
+    sql: str
+    chartConfig: ChartConfig
+    createdAt: str

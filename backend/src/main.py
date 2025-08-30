@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 import duckdb
@@ -7,6 +7,10 @@ import threading
 from queue import Queue, Empty
 from contextlib import contextmanager
 from typing import Dict, Any, List, Optional
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import the new models
 try:
@@ -22,7 +26,10 @@ try:
         ExecuteRequest,
         ExecuteResponse,
         ExplainResponse,
-        SQLErrorResponse
+        SQLErrorResponse,
+        Dashboard,
+        DashboardRequest,
+        ChartConfig
     )
     
     # Import the components
@@ -69,7 +76,10 @@ except ImportError:
         ExecuteRequest,
         ExecuteResponse,
         ExplainResponse,
-        SQLErrorResponse
+        SQLErrorResponse,
+        Dashboard,
+        DashboardRequest,
+        ChartConfig
     )
     
     # Import the components
@@ -487,6 +497,19 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
+@app.post("/api/test")
+async def test_endpoint(request: Request):
+    """Test endpoint to debug request handling"""
+    try:
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            body = await request.json()
+            return {"message": "JSON received", "body": body}
+        else:
+            return {"message": "Non-JSON request", "content_type": content_type}
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {str(e)}"}
+
 @app.post("/api/upload", response_model=UploadResponse)
 @handle_api_exception
 async def upload_csv(
@@ -561,13 +584,103 @@ async def upload_csv(
             raise HTTPException(status_code=500, detail="Failed to access demo data")
     
     # Ingest the CSV into DuckDB using DatabaseManager
-    table_metadata = db_manager.ingest_csv(
-        csv_path=upload_result.file_path,
-        table_name="sales"
-    )
+    try:
+        logger.info(f"Ingesting CSV from path: {upload_result.file_path}")
+        table_metadata = db_manager.ingest_csv(
+            csv_path=upload_result.file_path,
+            table_name="sales"
+        )
+        logger.info(f"Ingestion successful: {table_metadata}")
+    except Exception as e:
+        logger.error(f"DatabaseManager error: {type(e).__name__}: {str(e)}")
+        raise
     
     # Return successful response
     logger.info(f"Upload completed successfully: {table_metadata.table_name}")
+    return UploadResponse(
+        table=table_metadata.table_name,
+        columns=table_metadata.columns
+    )
+
+@app.post("/api/demo", response_model=UploadResponse)
+@handle_api_exception
+async def use_demo_data(
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Use demo data and ingest into DuckDB database.
+    
+    Returns:
+        UploadResponse: Information about the demo table and columns
+        
+    Raises:
+        HTTPException: Various HTTP status codes based on error type
+    """
+    DashlyLogger.log_api_request(logger, "POST", "/api/demo", 0)
+    logger.info("Demo data request received")
+    
+    # Process demo data using FileUploadHandler
+    upload_result = await file_handler.process_upload(file=None, use_demo=True)
+    
+    # Handle demo data case - copy demo file to backend data directory
+    import shutil
+    from pathlib import Path
+    
+    try:
+        # Get project root and validate demo path is within boundaries
+        project_root = Path.cwd().resolve()
+        project_demo_path = (project_root / "data" / "demo_sales.csv").resolve()
+        backend_demo_path = (project_root / "backend" / "data" / "sales.csv").resolve()
+        
+        # Security check: ensure paths are within project directory
+        if not str(project_demo_path).startswith(str(project_root)):
+            DashlyLogger.log_security_event(
+                logger, 
+                "INVALID_DEMO_PATH", 
+                f"Demo path outside project: {project_demo_path}"
+            )
+            raise HTTPException(status_code=403, detail="Invalid demo data path")
+        
+        if not str(backend_demo_path).startswith(str(project_root)):
+            DashlyLogger.log_security_event(
+                logger, 
+                "INVALID_BACKEND_PATH", 
+                f"Backend path outside project: {backend_demo_path}"
+            )
+            raise HTTPException(status_code=403, detail="Invalid backend data path")
+        
+        if not project_demo_path.exists():
+            logger.warning("Demo data file not found")
+            raise DemoDataNotFoundError("Demo data not available. Please run the demo data generation script first.")
+        
+        # Ensure backend data directory exists
+        backend_demo_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Copy demo file to backend data directory
+        shutil.copy2(str(project_demo_path), str(backend_demo_path))
+        upload_result.file_path = str(backend_demo_path)
+        logger.info(f"Demo data copied to: {backend_demo_path}")
+        
+    except DemoDataNotFoundError:
+        raise
+    except (OSError, ValueError) as e:
+        logger.error(f"Demo data access failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to access demo data")
+    
+    # Ingest the CSV into DuckDB using DatabaseManager
+    try:
+        logger.info(f"Ingesting CSV from path: {upload_result.file_path}")
+        table_metadata = db_manager.ingest_csv(
+            csv_path=upload_result.file_path,
+            table_name="sales"
+        )
+        logger.info(f"Ingestion successful: {table_metadata}")
+    except Exception as e:
+        logger.error(f"DatabaseManager error: {type(e).__name__}: {str(e)}")
+        raise
+    
+    # Return successful response
+    logger.info(f"Demo data loaded successfully: {table_metadata.table_name}")
     return UploadResponse(
         table=table_metadata.table_name,
         columns=table_metadata.columns
@@ -986,10 +1099,168 @@ async def explain_sql_query(
                 }
             )
 
+# Dashboard Management Endpoints
+# In-memory storage for MVP (replace with database in production)
+dashboards_storage: Dict[str, Dashboard] = {}
+
+@app.get("/api/dashboards", response_model=List[Dashboard])
+@handle_api_exception
+async def get_dashboards(authenticated: bool = Depends(verify_api_key)):
+    """Get all saved dashboards."""
+    logger.info("Dashboards list request received")
+    dashboards = list(dashboards_storage.values())
+    logger.info(f"Returning {len(dashboards)} dashboards")
+    return dashboards
+
+@app.post("/api/dashboards", response_model=Dashboard)
+@handle_api_exception
+async def save_dashboard(
+    request: DashboardRequest, 
+    authenticated: bool = Depends(verify_api_key)
+):
+    """Save a new dashboard."""
+    logger.info(f"Dashboard save request: {request.name}")
+    
+    # Generate unique ID
+    import uuid
+    dashboard_id = str(uuid.uuid4())
+    
+    # Create dashboard with timestamp
+    from datetime import datetime
+    dashboard = Dashboard(
+        id=dashboard_id,
+        name=request.name,
+        question=request.question,
+        sql=request.sql,
+        chartConfig=request.chartConfig,
+        createdAt=datetime.utcnow().isoformat()
+    )
+    
+    # Store dashboard
+    dashboards_storage[dashboard_id] = dashboard
+    
+    logger.info(f"Dashboard saved successfully: {dashboard_id}")
+    return dashboard
+
+@app.get("/api/dashboards/{dashboard_id}", response_model=Dashboard)
+@handle_api_exception
+async def get_dashboard(
+    dashboard_id: str, 
+    authenticated: bool = Depends(verify_api_key)
+):
+    """Get a specific dashboard by ID."""
+    logger.info(f"Dashboard get request: {dashboard_id}")
+    
+    if dashboard_id not in dashboards_storage:
+        raise HTTPException(
+            status_code=404,
+            detail="Dashboard not found"
+        )
+    
+    dashboard = dashboards_storage[dashboard_id]
+    logger.info(f"Dashboard retrieved: {dashboard.name}")
+    return dashboard
+
+@app.post("/api/translate", response_model=Dict[str, str])
+@handle_api_exception
+async def translate_query(
+    request: Dict[str, str], 
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Translate natural language query to SQL using LLM.
+    
+    Args:
+        request: Dictionary containing 'question' key with natural language query
+        
+    Returns:
+        Dict containing 'sql' key with generated SQL query
+    """
+    logger.info(f"Translate request: {request.get('question', '')[:50]}...")
+    
+    question = request.get('question', '').strip()
+    if not question:
+        raise HTTPException(
+            status_code=400,
+            detail="Question cannot be empty"
+        )
+    
+    try:
+        # Get database schema for context
+        schema_data = schema_service.get_all_tables_schema()
+        
+        # Import and use LLM service
+        try:
+            from .llm_service import get_llm_service
+        except ImportError:
+            from llm_service import get_llm_service
+        
+        llm_service = get_llm_service()
+        
+        # Translate question to SQL using LLM
+        sql = await llm_service.translate_to_sql(question, schema_data)
+        
+        logger.info(f"LLM generated SQL: {sql[:100]}...")
+        return {"sql": sql}
+        
+    except Exception as e:
+        logger.error(f"LLM translation failed: {str(e)}")
+        
+        # Fallback to pattern matching if LLM fails
+        logger.info("Falling back to pattern matching...")
+        question_lower = question.lower()
+        
+        # Use column name 'sales_amount' instead of 'amount' based on actual schema
+        if 'revenue' in question_lower or 'sales' in question_lower:
+            if 'monthly' in question_lower or 'month' in question_lower:
+                sql = """SELECT 
+    strftime('%Y-%m', date) as month,
+    SUM(sales_amount) as total_revenue
+FROM sales 
+GROUP BY strftime('%Y-%m', date)
+ORDER BY month"""
+            elif 'region' in question_lower:
+                sql = """SELECT 
+    region,
+    SUM(sales_amount) as total_revenue
+FROM sales 
+GROUP BY region
+ORDER BY total_revenue DESC"""
+            else:
+                sql = "SELECT SUM(sales_amount) as total_revenue FROM sales"
+        elif 'count' in question_lower or 'number' in question_lower:
+            sql = "SELECT COUNT(*) as total_count FROM sales"
+        elif 'average' in question_lower or 'avg' in question_lower:
+            sql = "SELECT AVG(sales_amount) as average_amount FROM sales"
+        elif 'top' in question_lower or 'best' in question_lower:
+            sql = """SELECT 
+    product,
+    SUM(sales_amount) as total_sales
+FROM sales 
+GROUP BY product
+ORDER BY total_sales DESC
+LIMIT 10"""
+        else:
+            # Default query
+            sql = "SELECT * FROM sales LIMIT 100"
+        
+        logger.info(f"Fallback generated SQL: {sql[:100]}...")
+        return {"sql": sql}
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up resources on application shutdown"""
     try:
+        # Cleanup LLM service
+        try:
+            from .llm_service import cleanup_llm_service
+        except ImportError:
+            from llm_service import cleanup_llm_service
+        
+        await cleanup_llm_service()
+        logger.info("LLM service cleaned up")
+        
+        # Cleanup database connections
         db_connection.close()
         logger.info("Database connection closed")
         if hasattr(db_manager, 'close'):

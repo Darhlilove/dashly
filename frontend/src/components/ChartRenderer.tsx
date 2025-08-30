@@ -19,16 +19,16 @@ interface ChartRendererProps {
   isLoading?: boolean;
 }
 
-// Color palette for charts
+// Color palette for charts - black/white/red theme
 const CHART_COLORS = [
-  "#3B82F6", // Blue
-  "#10B981", // Green
-  "#F59E0B", // Yellow
-  "#EF4444", // Red
-  "#8B5CF6", // Purple
-  "#06B6D4", // Cyan
-  "#F97316", // Orange
-  "#84CC16", // Lime
+  "#DC2626", // Red
+  "#000000", // Black
+  "#6B7280", // Gray
+  "#374151", // Dark Gray
+  "#9CA3AF", // Light Gray
+  "#F87171", // Light Red
+  "#FCA5A5", // Lighter Red
+  "#FEE2E2", // Very Light Red
 ];
 
 /**
@@ -40,7 +40,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = memo(
   ({
     data,
     config,
-    width,
+
     height = 400,
     className = "",
     onSaveDashboard,
@@ -61,9 +61,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = memo(
     // Validate configuration
     if (!validateChartConfig(data, chartConfig)) {
       return (
-        <div
-          className={`p-4 border border-red-200 rounded-lg bg-red-50 ${className}`}
-        >
+        <div className={`p-4 border border-red-600 bg-white ${className}`}>
           <p className="text-red-600">
             Invalid chart configuration for the provided data.
           </p>
@@ -82,9 +80,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = memo(
 
     if (chartData.length === 0) {
       return (
-        <div
-          className={`p-4 border border-gray-200 rounded-lg bg-gray-50 ${className}`}
-        >
+        <div className={`p-4 border border-gray-200 bg-white ${className}`}>
           <p className="text-gray-600">
             No data available for chart rendering.
           </p>
@@ -100,7 +96,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = memo(
           <button
             onClick={() => setShowSaveModal(true)}
             disabled={isLoading}
-            className="px-3 sm:px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
+            className="px-3 sm:px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
             aria-label="Save current dashboard configuration"
           >
             <svg
@@ -139,7 +135,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = memo(
             aria-label={`Line chart showing ${chartConfig.y} over ${chartConfig.x}`}
           >
             {renderSaveButton()}
-            <div className="bg-white rounded-lg border border-gray-200 p-2 sm:p-4">
+            <div className="bg-white border border-gray-200 p-2 sm:p-4">
               <Suspense fallback={chartFallback}>
                 <LineChartComponent
                   data={chartData}
@@ -168,7 +164,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = memo(
             }`}
           >
             {renderSaveButton()}
-            <div className="bg-white rounded-lg border border-gray-200 p-2 sm:p-4">
+            <div className="bg-white border border-gray-200 p-2 sm:p-4">
               <Suspense fallback={chartFallback}>
                 <BarChartComponent
                   data={chartData}
@@ -197,7 +193,7 @@ export const ChartRenderer: React.FC<ChartRendererProps> = memo(
             } by ${chartConfig.x || "category"}`}
           >
             {renderSaveButton()}
-            <div className="bg-white rounded-lg border border-gray-200 p-2 sm:p-4">
+            <div className="bg-white border border-gray-200 p-2 sm:p-4">
               <Suspense fallback={chartFallback}>
                 <PieChartComponent
                   data={chartData}
@@ -304,9 +300,7 @@ const TableView: React.FC<{ data: ChartData; className?: string }> = memo(
     }
 
     return (
-      <div
-        className={`bg-white rounded-lg border border-gray-200 ${className}`}
-      >
+      <div className={`bg-white border border-gray-200 ${className}`}>
         <div className="overflow-x-auto">
           <table
             className="min-w-full divide-y divide-gray-200"

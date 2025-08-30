@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -7,10 +7,10 @@
 @layer base {
   body {
     margin: 0;
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: 'Quicksand', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background-color: theme('colors.gray.50');
+    background-color: white;
   }
 
   * {
@@ -19,57 +19,57 @@
 }
 
 @layer components {
-  /* Button styles following Notion-like design with improved accessibility */
+  /* Button styles with no rounded corners, black/white/red theme */
   .btn-primary {
-    @apply bg-primary-600 text-white px-3 sm:px-4 py-2 rounded-notion font-medium hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base;
+    @apply bg-red-600 text-white px-3 sm:px-4 py-2 font-medium hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base;
   }
 
   .btn-secondary {
-    @apply bg-white text-secondary-700 border border-secondary-300 px-3 sm:px-4 py-2 rounded-notion font-medium hover:bg-secondary-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base;
+    @apply bg-white text-black border border-gray-300 px-3 sm:px-4 py-2 font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base;
   }
 
   .btn-ghost {
-    @apply text-secondary-700 px-3 sm:px-4 py-2 rounded-notion font-medium hover:bg-secondary-100 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base;
+    @apply text-black px-3 sm:px-4 py-2 font-medium hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm sm:text-base;
   }
 
-  /* Input styles with improved contrast */
+  /* Input styles with no rounded corners */
   .input-primary {
-    @apply w-full px-3 py-2 border border-secondary-300 rounded-notion focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors duration-200 disabled:bg-secondary-50 disabled:cursor-not-allowed text-sm sm:text-base;
+    @apply w-full px-3 py-2 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-colors duration-200 disabled:bg-gray-50 disabled:cursor-not-allowed text-sm sm:text-base;
   }
 
-  /* Card styles */
+  /* Card styles with no rounded corners */
   .card {
-    @apply bg-white rounded-notion shadow-notion border border-secondary-200;
+    @apply bg-white border border-gray-200;
   }
 
   .card-hover {
-    @apply card hover:shadow-notion-hover transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
+    @apply card hover:border-gray-300 transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2;
   }
 
-  /* Modal styles */
+  /* Modal styles with no rounded corners */
   .modal-overlay {
     @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50;
   }
 
   .modal-content {
-    @apply bg-white rounded-notion shadow-modal max-w-2xl w-full max-h-[90vh] overflow-hidden;
+    @apply bg-white max-w-2xl w-full max-h-[90vh] overflow-hidden border border-gray-300;
   }
 
-  /* Toast styles with improved contrast */
+  /* Toast styles with no rounded corners, black/white/red theme */
   .toast {
-    @apply px-3 sm:px-4 py-3 rounded-notion shadow-notion-hover border-l-4 animate-slide-up;
+    @apply px-3 sm:px-4 py-3 border-l-4 animate-slide-up;
   }
 
   .toast-success {
-    @apply toast bg-success-50 border-success-600 text-success-900;
+    @apply toast bg-white border-black text-black;
   }
 
   .toast-error {
-    @apply toast bg-error-50 border-error-600 text-error-900;
+    @apply toast bg-white border-red-600 text-black;
   }
 
   .toast-info {
-    @apply toast bg-primary-50 border-primary-600 text-primary-900;
+    @apply toast bg-white border-gray-600 text-black;
   }
 
   /* Text utilities */
@@ -89,7 +89,7 @@
 
   /* Focus visible utilities for better keyboard navigation */
   .focus-visible-ring {
-    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2;
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2;
   }
 
   /* Screen reader only utility */
@@ -107,6 +107,23 @@
 
   /* Skip link for keyboard navigation */
   .skip-link {
-    @apply sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary-600 focus:text-white focus:rounded-md focus:shadow-lg;
+    @apply sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-red-600 focus:text-white;
+  }
+
+  /* ChatGPT-style layout utilities */
+  .sidebar {
+    @apply bg-black text-white border-r border-gray-300;
+  }
+
+  .sidebar-item {
+    @apply px-4 py-2 hover:bg-gray-800 cursor-pointer transition-colors duration-200;
+  }
+
+  .sidebar-item-active {
+    @apply sidebar-item bg-gray-800;
+  }
+
+  .main-content {
+    @apply bg-white flex-1 overflow-hidden;
   }
 }

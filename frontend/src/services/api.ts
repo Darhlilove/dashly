@@ -9,6 +9,7 @@ import {
 } from "../types/api";
 import { Dashboard } from "../types/dashboard";
 import { sessionCache } from "../utils/cache";
+import { measurePerformance } from "../utils/performance";
 
 interface RetryConfig {
   retries: number;
@@ -297,16 +298,25 @@ class ApiService {
   // Use demo data with retry logic
   async useDemoData(): Promise<UploadResponse> {
     return this.retryRequest(async () => {
-      const response = await this.client.post<UploadResponse>("/upload", {
-        use_demo: true,
-      });
+      const formData = new FormData();
+      formData.append("use_demo", "true");
+
+      const response = await this.client.post<UploadResponse>(
+        "/upload",
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
+      );
 
       return response.data;
     });
   }
 
   // Translate natural language to SQL with retry logic
-  async translateQuery(query: string): Promise<TranslateResponse> {
+  translateQuery = measurePerformance("api_translateQuery", async (query: string): Promise<TranslateResponse> => {
     if (!query.trim()) {
       throw {
         message: "Please enter a question about your data.",
@@ -315,22 +325,25 @@ class ApiService {
     }
 
     return this.retryRequest(async () => {
-      const response = await this.client.post<TranslateResponse>(
-        "/translate",
+      const response = await this.client.post<any>(
+        "/query",
         {
-          question: query.trim(),
+          query: query.trim(),
         },
         {
           timeout: 45000, // Longer timeout for LLM processing
         }
       );
 
-      return response.data;
+      // The /api/query endpoint returns a different format, so we need to adapt it
+      return {
+        sql: response.data.sql,
+      };
     });
-  }
+  });
 
   // Execute SQL query with retry logic and caching
-  async executeSQL(sql: string, question?: string): Promise<ExecuteResponse> {
+  executeSQL = measurePerformance("api_executeSQL", async (sql: string, question?: string): Promise<ExecuteResponse> => {
     if (!sql.trim()) {
       throw {
         message: "SQL query cannot be empty.",
@@ -365,6 +378,7 @@ class ApiService {
 
       return response.data;
     });
+  });
   }
 
   // Save dashboard configuration with retry logic

@@ -66,16 +66,8 @@ export default {
         },
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"],
-      },
-      boxShadow: {
-        notion: "0 1px 3px rgba(0, 0, 0, 0.1)",
-        "notion-hover": "0 4px 12px rgba(0, 0, 0, 0.15)",
-        modal:
-          "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
-      },
-      borderRadius: {
-        notion: "6px",
+        sans: ["Quicksand", "system-ui", "sans-serif"],
+        brand: ["Tsukimi Rounded", "system-ui", "sans-serif"],
       },
       spacing: {
         18: "4.5rem",
