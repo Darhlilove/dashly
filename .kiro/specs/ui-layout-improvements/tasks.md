@@ -31,7 +31,7 @@
 
 - [ ] 3. Create AutoHideSidebar component with hover detection
 
-  - [ ] 3.1 Build sidebar container with overlay positioning
+  - [ ] 3.1 Update sidebar container with overlay positioning
 
     - Create sidebar wrapper with fixed positioning and z-index management
     - Implement CSS transforms for smooth slide in/out animations
