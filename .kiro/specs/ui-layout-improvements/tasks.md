@@ -73,16 +73,16 @@
     - Create export to CSV functionality
     - _Requirements: 3.2, 3.6_
 
-- [ ] 5. Implement ViewToggle component for dashboard/data switching
+- [x] 5. Implement ViewToggle component for dashboard/data switching
 
-  - [ ] 5.1 Create toggle UI component with accessibility
+  - [x] 5.1 Create toggle UI component with accessibility
 
     - Build tab-style toggle with proper ARIA labels and keyboard navigation
     - Add visual indicators for active view state
     - Implement disabled state when no charts are available
     - _Requirements: 3.3, 3.4, 3.7_
 
-  - [ ] 5.2 Add smooth view transition animations
+  - [x] 5.2 Add smooth view transition animations
     - Implement fade/slide transitions between dashboard and data views
     - Add loading states during view switches
     - Ensure transitions respect reduced motion preferences
