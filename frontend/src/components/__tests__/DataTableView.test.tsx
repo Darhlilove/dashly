@@ -225,4 +225,114 @@ describe("DataTableView", () => {
     // Should not have cursor-pointer class when sorting is disabled
     expect(nameHeader.closest("th")).not.toHaveClass("cursor-pointer");
   });
+
+  it("handles virtual scrolling performance optimization", () => {
+    const largeData = Array.from({ length: 1000 }, (_, i) => [
+      i + 1,
+      `User ${i + 1}`,
+      20 + i,
+      `user${i + 1}@example.com`,
+    ]);
+
+    render(
+      <DataTableView
+        tableInfo={mockTableInfo}
+        data={largeData}
+        virtualScrolling={true}
+        maxRows={100}
+      />
+    );
+
+    // Should indicate virtual scrolling is active
+    expect(
+      screen.getByText("1000 rows × 4 columns (Virtual Scrolling)")
+    ).toBeInTheDocument();
+
+    // Should not render all 1000 rows in DOM (performance optimization)
+    const rows = screen.getAllByRole("row");
+    // Should have header + visible rows (much less than 1000)
+    expect(rows.length).toBeLessThan(200);
+  });
+
+  it("handles scroll events in virtual scrolling mode", () => {
+    const largeData = Array.from({ length: 500 }, (_, i) => [
+      i + 1,
+      `User ${i + 1}`,
+      20 + i,
+      `user${i + 1}@example.com`,
+    ]);
+
+    render(
+      <DataTableView
+        tableInfo={mockTableInfo}
+        data={largeData}
+        virtualScrolling={true}
+      />
+    );
+
+    const tableContainer = screen.getByRole("table").closest("div");
+
+    // Simulate scroll event
+    fireEvent.scroll(tableContainer!, { target: { scrollTop: 1000 } });
+
+    // Component should handle scroll without crashing
+    expect(screen.getByRole("table")).toBeInTheDocument();
+  });
+
+  it("calls onLoadMore when reaching end of data", () => {
+    const mockLoadMore = vi.fn();
+    const largeData = Array.from({ length: 150 }, (_, i) => [
+      i + 1,
+      `User ${i + 1}`,
+      20 + i,
+      `user${i + 1}@example.com`,
+    ]);
+
+    render(
+      <DataTableView
+        tableInfo={mockTableInfo}
+        data={largeData}
+        maxRows={100}
+        virtualScrolling={false}
+        onLoadMore={mockLoadMore}
+      />
+    );
+
+    const loadMoreButton = screen.getByText("Load More Rows");
+    fireEvent.click(loadMoreButton);
+
+    expect(mockLoadMore).toHaveBeenCalled();
+  });
+
+  it("handles data export functionality", () => {
+    render(
+      <DataTableView
+        tableInfo={mockTableInfo}
+        data={mockData}
+        enableExport={true}
+      />
+    );
+
+    const exportButton = screen.getByText("Export CSV");
+    expect(exportButton).toBeInTheDocument();
+
+    // Test that clicking doesn't crash the component
+    expect(() => {
+      fireEvent.click(exportButton);
+    }).not.toThrow();
+  });
+
+  it("handles column resizing when enabled", () => {
+    render(
+      <DataTableView
+        tableInfo={mockTableInfo}
+        data={mockData}
+        enableColumnResize={true}
+      />
+    );
+
+    // Component should render without crashing when column resize is enabled
+    expect(screen.getByText("name")).toBeInTheDocument();
+    expect(screen.getByText("age")).toBeInTheDocument();
+  });
 });

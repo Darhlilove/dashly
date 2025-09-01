@@ -13,12 +13,12 @@ export const LAYOUT_CONFIG: LayoutConfig = {
 
   defaultSizes: {
     desktop: {
-      chat: 16.67, // 1/6 of screen width
-      dashboard: 83.33, // 5/6 of screen width
+      chat: 25, // 25% chat width as requested
+      dashboard: 75, // 75% dashboard width
     },
     tablet: {
-      chat: 20,
-      dashboard: 80,
+      chat: 30,
+      dashboard: 70,
     },
     mobile: {
       chat: 100, // Full width when stacked
@@ -33,8 +33,8 @@ export const LAYOUT_CONFIG: LayoutConfig = {
   },
 
   constraints: {
-    minChatWidth: 10, // minimum 10% width
-    maxChatWidth: 50, // maximum 50% width
+    minChatWidth: 20, // minimum 20% width
+    maxChatWidth: 60, // maximum 60% width
     sidebarTriggerWidth: 20, // 20px trigger zone
     sidebarHideDelay: 1000, // 1 second delay before hiding
   },

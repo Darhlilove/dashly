@@ -11,12 +11,7 @@ export function runOptimizationChecks() {
   console.group("🚀 Dashly Performance Optimization Status");
 
   // Check if React.memo is being used
-  const memoizedComponents = [
-    "ChartRenderer",
-    "MainLayout",
-    "DashboardCard",
-    "QueryBox",
-  ];
+  const memoizedComponents = ["ChartRenderer", "DashboardCard", "QueryBox"];
 
   console.log("✅ Memoized Components:", memoizedComponents.join(", "));
 

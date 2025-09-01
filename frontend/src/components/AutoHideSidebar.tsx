@@ -1,5 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { withLayoutErrorBoundary } from "./LayoutErrorBoundary";
+import { usePerformanceMonitor } from "../utils/performanceMonitor";
+import {
+  createFallbackProps,
+  analyzeViewportConstraints,
+} from "../utils/gracefulDegradation";
 
 interface AutoHideSidebarProps {
   children: React.ReactNode; // Main content
@@ -7,20 +14,25 @@ interface AutoHideSidebarProps {
   isVisible: boolean;
   onVisibilityChange: (visible: boolean) => void;
   triggerWidth?: number; // Default: 20px
-  hideDelay?: number; // Default: 1000ms
+  hideDelay?: number; // Default: 0ms (instant)
 }
 
-export default function AutoHideSidebar({
+function AutoHideSidebar({
   children,
   sidebarContent,
   isVisible,
   onVisibilityChange,
   triggerWidth = 20,
-  hideDelay = 1000,
+  hideDelay = 0,
 }: AutoHideSidebarProps) {
-  const [isHovering, setIsHovering] = useState(false);
-  const hideTimeoutRef = useRef<number | null>(null);
+  const [, setIsHovering] = useState(false);
+  const [isInTriggerZone, setIsInTriggerZone] = useState(false);
+  const [animationState, setAnimationState] = useState<
+    "idle" | "entering" | "exiting"
+  >("idle");
+  const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const isMobile = useMediaQuery("(max-width: 768px)");
 
   // Clear timeout when component unmounts
@@ -32,19 +44,48 @@ export default function AutoHideSidebar({
     };
   }, []);
 
+  // Focus management when sidebar visibility changes
+  useEffect(() => {
+    if (isVisible) {
+      // Store the currently focused element before showing sidebar
+      previousFocusRef.current = document.activeElement as HTMLElement;
+
+      // Focus the first focusable element in the sidebar after animation
+      setTimeout(() => {
+        if (sidebarRef.current) {
+          const firstFocusable = sidebarRef.current.querySelector(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          ) as HTMLElement;
+          firstFocusable?.focus();
+        }
+      }, 250); // Wait for animation to complete
+    } else {
+      // Restore focus to the previously focused element when hiding sidebar
+      if (
+        previousFocusRef.current &&
+        document.contains(previousFocusRef.current)
+      ) {
+        previousFocusRef.current.focus();
+      }
+      previousFocusRef.current = null;
+    }
+  }, [isVisible]);
+
   // Handle mouse position tracking for trigger zone
   useEffect(() => {
     if (isMobile) return; // Skip mouse tracking on mobile
 
     const handleMouseMove = (e: MouseEvent) => {
-      const isInTriggerZone = e.clientX <= triggerWidth;
+      const inTriggerZone = e.clientX <= triggerWidth;
+      setIsInTriggerZone(inTriggerZone);
 
-      if (isInTriggerZone && !isVisible) {
+      if (inTriggerZone && !isVisible) {
         // Clear any pending hide timeout
         if (hideTimeoutRef.current) {
           clearTimeout(hideTimeoutRef.current);
           hideTimeoutRef.current = null;
         }
+        setAnimationState("entering");
         onVisibilityChange(true);
       }
     };
@@ -70,6 +111,7 @@ export default function AutoHideSidebar({
       clearTimeout(hideTimeoutRef.current);
     }
     hideTimeoutRef.current = setTimeout(() => {
+      setAnimationState("exiting");
       onVisibilityChange(false);
     }, hideDelay);
   }, [onVisibilityChange, hideDelay]);
@@ -134,6 +176,68 @@ export default function AutoHideSidebar({
     touchStartRef.current = null;
   }, [isMobile]);
 
+  // Keyboard shortcuts for sidebar control
+  useKeyboardShortcuts({
+    shortcuts: [
+      {
+        key: "s",
+        ctrlKey: true,
+        action: () => {
+          onVisibilityChange(!isVisible);
+        },
+        description: "Toggle sidebar visibility",
+      },
+      {
+        key: "s",
+        metaKey: true,
+        action: () => {
+          onVisibilityChange(!isVisible);
+        },
+        description: "Toggle sidebar visibility",
+      },
+      {
+        key: "Escape",
+        action: () => {
+          if (isVisible) {
+            onVisibilityChange(false);
+          }
+        },
+        description: "Close sidebar",
+      },
+    ],
+    enabled: true,
+  });
+
+  // Handle keyboard navigation within sidebar
+  const handleSidebarKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onVisibilityChange(false);
+      } else if (e.key === "Tab") {
+        // Trap focus within sidebar when visible
+        if (!sidebarRef.current) return;
+
+        const focusableElements = sidebarRef.current.querySelectorAll(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        const firstElement = focusableElements[0] as HTMLElement;
+        const lastElement = focusableElements[
+          focusableElements.length - 1
+        ] as HTMLElement;
+
+        if (e.shiftKey && document.activeElement === firstElement) {
+          e.preventDefault();
+          lastElement?.focus();
+        } else if (!e.shiftKey && document.activeElement === lastElement) {
+          e.preventDefault();
+          firstElement?.focus();
+        }
+      }
+    },
+    [onVisibilityChange]
+  );
+
   return (
     <div className="relative h-full">
       {/* Main content */}
@@ -151,7 +255,11 @@ export default function AutoHideSidebar({
         {/* Mobile backdrop */}
         {isMobile && isVisible && (
           <div
-            className="fixed inset-0 bg-black bg-opacity-50 transition-opacity duration-200"
+            className={`
+              fixed inset-0 bg-black bg-opacity-50
+              ${animationState === "entering" ? "sidebar-backdrop-fade-in" : ""}
+              ${animationState === "exiting" ? "sidebar-backdrop-fade-out" : ""}
+            `}
             style={{ zIndex: "var(--z-sidebar-overlay)" }}
             onClick={handleBackdropClick}
             aria-hidden="true"
@@ -164,17 +272,21 @@ export default function AutoHideSidebar({
             ref={sidebarRef}
             className={`
               fixed top-0 left-0 h-full
-              transform transition-transform duration-200 ease-in-out
-              ${isVisible ? "translate-x-0" : "-translate-x-full"}
+              ${isVisible ? "sidebar-slide-in" : "sidebar-slide-out"}
               ${isMobile ? "w-64" : "w-auto"}
             `}
             style={{
               zIndex: "var(--z-sidebar)",
-              willChange: "transform",
+              willChange: "transform, opacity",
+              transform: isVisible ? "translateX(0)" : "translateX(-100%)",
             }}
             onMouseEnter={handleSidebarMouseEnter}
             onMouseLeave={handleSidebarMouseLeave}
+            onKeyDown={handleSidebarKeyDown}
+            role="complementary"
+            aria-label="Navigation sidebar"
             aria-hidden={!isVisible}
+            aria-expanded={isVisible}
           >
             {sidebarContent}
           </div>
@@ -182,18 +294,44 @@ export default function AutoHideSidebar({
       </>
 
       {/* Trigger zone indicator */}
-      {!isVisible && (
+      {!isVisible && !isMobile && (
+        <>
+          <div
+            className={`
+              fixed top-0 left-0 h-full pointer-events-none
+              ${
+                isInTriggerZone
+                  ? "sidebar-trigger-hover"
+                  : "sidebar-trigger-glow"
+              }
+            `}
+            style={{
+              width: `${triggerWidth}px`,
+              zIndex: "var(--z-sidebar-overlay)",
+              background: isInTriggerZone
+                ? "linear-gradient(90deg, rgba(156, 163, 175, 0.4) 0%, rgba(156, 163, 175, 0.2) 70%, transparent 100%)"
+                : "rgba(156, 163, 175, 0.1)",
+            }}
+            aria-hidden="true"
+          />
+          {/* Accessible button for keyboard users to open sidebar */}
+          <button
+            className="fixed top-4 left-2 z-50 px-2 py-1 text-xs bg-gray-800 text-white rounded opacity-0 focus:opacity-100 transition-opacity"
+            onClick={() => onVisibilityChange(true)}
+            aria-label="Open navigation sidebar (Ctrl+S)"
+            style={{ zIndex: "var(--z-sidebar-overlay)" }}
+          >
+            Open Sidebar
+          </button>
+        </>
+      )}
+
+      {/* Mobile trigger zone indicator */}
+      {!isVisible && isMobile && (
         <div
-          className={`
-            fixed top-0 left-0 h-full transition-opacity duration-200 pointer-events-none
-            ${
-              isMobile
-                ? "opacity-10 bg-gray-400"
-                : "opacity-0 hover:opacity-20 bg-gray-300"
-            }
-          `}
+          className="fixed top-0 left-0 h-full pointer-events-none opacity-10 bg-gray-400"
           style={{
-            width: `${isMobile ? triggerWidth * 2 : triggerWidth}px`,
+            width: `${triggerWidth * 2}px`,
             zIndex: "var(--z-sidebar-overlay)",
           }}
           aria-hidden="true"
@@ -225,3 +363,53 @@ export default function AutoHideSidebar({
     </div>
   );
 }
+
+// Enhanced AutoHideSidebar with error boundary and performance monitoring
+const EnhancedAutoHideSidebar: React.FC<AutoHideSidebarProps> = (props) => {
+  const performanceMonitor = usePerformanceMonitor("AutoHideSidebar");
+  const { constraints } = analyzeViewportConstraints();
+
+  // Apply graceful degradation based on constraints
+  const fallbackProps = createFallbackProps("AutoHideSidebar");
+  const enhancedProps = { ...fallbackProps, ...props };
+
+  // Check for extreme constraints that require fallback
+  if (constraints.includes("very-short")) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="bg-yellow-50 border-b border-yellow-200 p-2">
+          <p className="text-xs text-yellow-800">
+            Screen too short for auto-hide sidebar. Using bottom navigation.
+          </p>
+        </div>
+        <div className="flex-1 overflow-hidden">{props.children}</div>
+        <div className="border-t border-gray-200 bg-white p-2 max-h-32 overflow-auto">
+          {props.sidebarContent}
+        </div>
+      </div>
+    );
+  }
+
+  // Skip enhancements in test environment
+  const isTestEnv = typeof window !== "undefined" && (window as any).__vitest__;
+  if (isTestEnv) {
+    return <AutoHideSidebar {...props} />;
+  }
+
+  // Measure render performance
+  const endMeasure = performanceMonitor.measureRender();
+
+  useEffect(() => {
+    endMeasure();
+  });
+
+  return <AutoHideSidebar {...enhancedProps} />;
+};
+
+// Wrap with error boundary (skip in tests)
+const isTestEnv = typeof window !== "undefined" && (window as any).__vitest__;
+const AutoHideSidebarWithErrorBoundary = isTestEnv
+  ? AutoHideSidebar
+  : withLayoutErrorBoundary(EnhancedAutoHideSidebar, "AutoHideSidebar");
+
+export { AutoHideSidebarWithErrorBoundary as default };

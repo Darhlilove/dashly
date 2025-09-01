@@ -52,7 +52,7 @@ export const useErrorHandler = (
     retryCount: 0,
   });
 
-  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const retryTimeoutRef = useRef<number | null>(null);
   const [timeUntilNextRetry, setTimeUntilNextRetry] = useState<number | null>(
     null
   );

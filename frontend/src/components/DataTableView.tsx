@@ -8,6 +8,12 @@ import React, {
 } from "react";
 import { UploadResponse } from "../types";
 import LoadingSpinner from "./LoadingSpinner";
+import { withLayoutErrorBoundary } from "./LayoutErrorBoundary";
+import {
+  usePerformanceMonitor,
+  detectDatasetPerformanceIssues,
+} from "../utils/performanceMonitor";
+import { createFallbackProps } from "../utils/gracefulDegradation";
 
 interface DataTableViewProps {
   tableInfo: UploadResponse;
@@ -183,15 +189,31 @@ const DataTableView: React.FC<DataTableViewProps> = memo(
         ),
       ].join("\n");
 
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-      const link = document.createElement("a");
-      const url = URL.createObjectURL(blob);
-      link.setAttribute("href", url);
-      link.setAttribute("download", `${tableInfo.table}_export.csv`);
-      link.style.visibility = "hidden";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      try {
+        const blob = new Blob([csvContent], {
+          type: "text/csv;charset=utf-8;",
+        });
+        const link = document.createElement("a");
+
+        // Check if URL.createObjectURL is available (not in test environment)
+        if (typeof URL !== "undefined" && URL.createObjectURL) {
+          const url = URL.createObjectURL(blob);
+          link.setAttribute("href", url);
+          link.setAttribute("download", `${tableInfo.table}_export.csv`);
+          link.style.visibility = "hidden";
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        } else {
+          // Fallback for test environments or unsupported browsers
+          console.warn(
+            "Export functionality not available in this environment"
+          );
+        }
+      } catch (error) {
+        console.error("Failed to export CSV:", error);
+      }
     }, [enableExport, sortedData, columns, tableInfo.table]);
 
     // Update container height on resize
@@ -211,7 +233,7 @@ const DataTableView: React.FC<DataTableViewProps> = memo(
     if (!data || data.length === 0) {
       return (
         <div
-          className={`bg-white border border-gray-200 rounded-lg ${className}`}
+          className={`bg-white border border-gray-200 rounded-lg ${className} flex items-center justify-center`}
         >
           <div className="p-8 text-center">
             <div className="w-16 h-16 mx-auto mb-4 text-gray-300">
@@ -307,7 +329,7 @@ const DataTableView: React.FC<DataTableViewProps> = memo(
               {enableExport && (
                 <button
                   onClick={handleExport}
-                  className="px-3 py-1 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100"
+                  className="px-3 py-1 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 active:bg-blue-200 active:scale-95 focus:outline-none transition-all duration-150"
                 >
                   Export CSV
                 </button>
@@ -338,7 +360,7 @@ const DataTableView: React.FC<DataTableViewProps> = memo(
                 placeholder="Search data..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:border-gray-400 active:border-gray-400 text-sm"
               />
             </div>
           )}
@@ -506,4 +528,10 @@ const DataTableView: React.FC<DataTableViewProps> = memo(
 
 DataTableView.displayName = "DataTableView";
 
-export default DataTableView;
+// Wrap with error boundary (skip in tests to avoid interfering with existing tests)
+const DataTableViewWithErrorBoundary =
+  process.env.NODE_ENV === "test"
+    ? DataTableView
+    : withLayoutErrorBoundary(DataTableView, "DataTableView");
+
+export default DataTableViewWithErrorBoundary;

@@ -8,6 +8,7 @@ export interface ViewTransitionProps {
   isLoading?: boolean;
   className?: string;
   animationDuration?: number; // in milliseconds
+  transitionType?: "fade" | "slide";
 }
 
 const ViewTransition: React.FC<ViewTransitionProps> = ({
@@ -16,12 +17,17 @@ const ViewTransition: React.FC<ViewTransitionProps> = ({
   dataContent,
   isLoading = false,
   className = "",
-  animationDuration = 150,
+  animationDuration = 200,
+  transitionType = "fade",
 }) => {
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [displayView, setDisplayView] = useState(currentView);
+  const [previousView, setPreviousView] = useState<ViewType | null>(null);
+  const [animationPhase, setAnimationPhase] = useState<
+    "idle" | "exiting" | "entering"
+  >("idle");
   const containerRef = useRef<HTMLDivElement>(null);
-  const timeoutRef = useRef<NodeJS.Timeout>();
+  const timeoutRef = useRef<number>();
 
   // Check for reduced motion preference
   const prefersReducedMotion =
@@ -34,6 +40,7 @@ const ViewTransition: React.FC<ViewTransitionProps> = ({
 
   useEffect(() => {
     if (currentView !== displayView) {
+      setPreviousView(displayView);
       setIsTransitioning(true);
 
       // Clear any existing timeout
@@ -45,18 +52,25 @@ const ViewTransition: React.FC<ViewTransitionProps> = ({
       if (prefersReducedMotion) {
         setDisplayView(currentView);
         setIsTransitioning(false);
+        setAnimationPhase("idle");
         return;
       }
 
-      // Start transition after a brief delay to ensure smooth animation
+      // Phase 1: Exit animation
+      setAnimationPhase("exiting");
+
+      // Phase 2: Switch content and enter animation
       timeoutRef.current = setTimeout(() => {
         setDisplayView(currentView);
+        setAnimationPhase("entering");
 
-        // End transition after animation completes
+        // Phase 3: Complete transition
         timeoutRef.current = setTimeout(() => {
           setIsTransitioning(false);
+          setAnimationPhase("idle");
+          setPreviousView(null);
         }, effectiveAnimationDuration);
-      }, 10);
+      }, effectiveAnimationDuration / 2);
     }
 
     return () => {
@@ -72,14 +86,33 @@ const ViewTransition: React.FC<ViewTransitionProps> = ({
   ]);
 
   const getTransitionClasses = () => {
-    const baseClasses = "transition-all ease-in-out";
-    const durationClass = `duration-${effectiveAnimationDuration}`;
-
-    if (isTransitioning) {
-      return `${baseClasses} ${durationClass} opacity-0 transform scale-95`;
+    if (prefersReducedMotion || !isTransitioning) {
+      return "opacity-100 transform translate-x-0 scale-100";
     }
 
-    return `${baseClasses} ${durationClass} opacity-100 transform scale-100`;
+    const baseClasses = "w-full h-full";
+
+    if (transitionType === "slide") {
+      if (animationPhase === "exiting") {
+        return `${baseClasses} view-slide-out`;
+      } else if (animationPhase === "entering") {
+        // Determine slide direction based on view change
+        const slideDirection =
+          currentView === "dashboard"
+            ? "view-slide-in-left"
+            : "view-slide-in-right";
+        return `${baseClasses} ${slideDirection}`;
+      }
+    } else {
+      // Fade transition
+      if (animationPhase === "exiting") {
+        return `${baseClasses} view-fade-out`;
+      } else if (animationPhase === "entering") {
+        return `${baseClasses} view-fade-in`;
+      }
+    }
+
+    return baseClasses;
   };
 
   const renderContent = () => {
@@ -87,7 +120,7 @@ const ViewTransition: React.FC<ViewTransitionProps> = ({
       return (
         <div className="flex items-center justify-center h-64">
           <div className="flex flex-col items-center space-y-4">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            <div className="loading-spinner-enhanced rounded-full h-8 w-8 border-2 border-gray-200 border-t-blue-600"></div>
             <p className="text-sm text-gray-600">Loading view...</p>
           </div>
         </div>
@@ -97,48 +130,53 @@ const ViewTransition: React.FC<ViewTransitionProps> = ({
     return displayView === "dashboard" ? dashboardContent : dataContent;
   };
 
+  const renderLoadingOverlay = () => {
+    if (!isTransitioning && !isLoading) return null;
+
+    return (
+      <div
+        className="absolute inset-0 bg-white bg-opacity-90 flex items-center justify-center z-10 pointer-events-none"
+        style={{
+          opacity: animationPhase === "exiting" ? 1 : 0,
+          transition: `opacity ${effectiveAnimationDuration / 2}ms ease-in-out`,
+        }}
+      >
+        <div className="loading-dots-enhanced flex space-x-1">
+          <div className="dot w-2 h-2 bg-blue-600 rounded-full"></div>
+          <div className="dot w-2 h-2 bg-blue-600 rounded-full"></div>
+          <div className="dot w-2 h-2 bg-blue-600 rounded-full"></div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full ${className}`}
+      className={`relative w-full h-full overflow-hidden ${className}`}
       style={{
         minHeight: "200px", // Prevent layout shift during transitions
       }}
     >
       <div
         className={getTransitionClasses()}
-        style={{
-          transitionDuration: `${effectiveAnimationDuration}ms`,
-        }}
         role="tabpanel"
         id={`${displayView}-panel`}
         aria-labelledby={`${displayView}-tab`}
         tabIndex={0}
+        aria-live="polite"
+        aria-atomic="true"
       >
         {renderContent()}
       </div>
 
-      {/* Loading overlay for smooth transitions */}
-      {(isTransitioning || isLoading) && (
-        <div
-          className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10"
-          style={{
-            transition: `opacity ${effectiveAnimationDuration}ms ease-in-out`,
-          }}
-        >
-          <div className="animate-pulse">
-            <div className="flex space-x-1">
-              <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
-              <div
-                className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"
-                style={{ animationDelay: "0.1s" }}
-              ></div>
-              <div
-                className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"
-                style={{ animationDelay: "0.2s" }}
-              ></div>
-            </div>
-          </div>
+      {/* Enhanced loading overlay */}
+      {renderLoadingOverlay()}
+
+      {/* Context preservation indicator */}
+      {isTransitioning && previousView && (
+        <div className="absolute top-2 right-2 text-xs text-gray-500 bg-white px-2 py-1 rounded shadow-sm z-20">
+          Switching to {currentView === "dashboard" ? "Dashboard" : "Data"} view
         </div>
       )}
     </div>

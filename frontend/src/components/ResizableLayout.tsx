@@ -1,7 +1,14 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { LAYOUT_CONFIG, CSS_VARIABLES, Z_INDEX } from "../config/layout";
 import { useBreakpoint } from "../hooks/useMediaQuery";
-import { LayoutState, ResizeConstraints } from "../types/layout";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { LayoutState } from "../types/layout";
+import { withLayoutErrorBoundary } from "./LayoutErrorBoundary";
+import { usePerformanceMonitor } from "../utils/performanceMonitor";
+import {
+  createFallbackProps,
+  analyzeViewportConstraints,
+} from "../utils/gracefulDegradation";
 
 interface ResizableLayoutProps {
   chatContent: React.ReactNode;
@@ -46,6 +53,9 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
   const [layoutState, setLayoutState] = useState<
     Pick<LayoutState, "chatPaneWidth" | "dashboardPaneWidth" | "isResizing"> & {
       nearSnap: boolean;
+      isSnapping: boolean;
+      atMinConstraint: boolean;
+      atMaxConstraint: boolean;
     }
   >(() => {
     const chatWidth = initialChatWidth ?? getDefaultChatWidth();
@@ -54,6 +64,9 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
       dashboardPaneWidth: 100 - chatWidth,
       isResizing: false,
       nearSnap: false,
+      isSnapping: false,
+      atMinConstraint: false,
+      atMaxConstraint: false,
     };
   });
 
@@ -74,11 +87,11 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
     if (containerRef.current) {
       const container = containerRef.current;
       container.style.setProperty(
-        CSS_VARIABLES.chatWidth,
+        "--chat-pane-width",
         `${layoutState.chatPaneWidth}%`
       );
       container.style.setProperty(
-        CSS_VARIABLES.dashboardWidth,
+        "--dashboard-pane-width",
         `${layoutState.dashboardPaneWidth}%`
       );
     }
@@ -91,13 +104,30 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
 
   // Calculate new width percentage based on mouse position
   const calculateNewWidth = useCallback(
-    (clientX: number): number => {
-      if (!containerRef.current) return layoutState.chatPaneWidth;
+    (
+      clientX: number
+    ): {
+      width: number;
+      nearSnap: boolean;
+      atMinConstraint: boolean;
+      atMaxConstraint: boolean;
+    } => {
+      if (!containerRef.current)
+        return {
+          width: layoutState.chatPaneWidth,
+          nearSnap: false,
+          atMinConstraint: false,
+          atMaxConstraint: false,
+        };
 
       const containerRect = containerRef.current.getBoundingClientRect();
       const containerWidth = containerRect.width;
       const relativeX = clientX - containerRect.left;
       let newChatWidth = (relativeX / containerWidth) * 100;
+
+      // Check constraint boundaries before applying them
+      const atMinConstraint = newChatWidth <= minChatWidth;
+      const atMaxConstraint = newChatWidth >= maxChatWidth;
 
       // Apply constraints
       newChatWidth = Math.min(
@@ -114,7 +144,12 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
         newChatWidth = defaultWidth;
       }
 
-      return newChatWidth;
+      return {
+        width: newChatWidth,
+        nearSnap: isNearSnap,
+        atMinConstraint,
+        atMaxConstraint,
+      };
     },
     [layoutState.chatPaneWidth, minChatWidth, maxChatWidth, getDefaultChatWidth]
   );
@@ -142,13 +177,26 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
 
   // Enhanced width calculation with content validation
   const calculateValidatedWidth = useCallback(
-    (clientX: number): number => {
-      const newWidth = calculateNewWidth(clientX);
+    (
+      clientX: number
+    ): {
+      width: number;
+      nearSnap: boolean;
+      atMinConstraint: boolean;
+      atMaxConstraint: boolean;
+    } => {
+      const result = calculateNewWidth(clientX);
 
       // If the new width would make content non-functional, constrain it
-      if (!validateContentSizes(newWidth)) {
+      if (!validateContentSizes(result.width)) {
         // Find the closest valid width
-        if (!containerRef.current) return layoutState.chatPaneWidth;
+        if (!containerRef.current)
+          return {
+            width: layoutState.chatPaneWidth,
+            nearSnap: false,
+            atMinConstraint: false,
+            atMaxConstraint: false,
+          };
 
         const containerRect = containerRef.current.getBoundingClientRect();
         const containerWidth = containerRect.width;
@@ -165,13 +213,20 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
           maxChatWidth
         );
 
-        return Math.min(
-          Math.max(newWidth, minValidChatWidth),
+        const constrainedWidth = Math.min(
+          Math.max(result.width, minValidChatWidth),
           maxValidChatWidth
         );
+
+        return {
+          width: constrainedWidth,
+          nearSnap: result.nearSnap,
+          atMinConstraint: constrainedWidth <= minValidChatWidth,
+          atMaxConstraint: constrainedWidth >= maxValidChatWidth,
+        };
       }
 
-      return newWidth;
+      return result;
     },
     [
       calculateNewWidth,
@@ -193,8 +248,7 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
       setLayoutState((prev) => ({ ...prev, isResizing: true }));
 
       // Add cursor style to body during drag
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
+      document.body.classList.add("resize-cursor-active");
     },
     [layoutState.chatPaneWidth]
   );
@@ -205,21 +259,18 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
       if (!isDraggingRef.current) return;
 
       e.preventDefault();
-      const newChatWidth = calculateValidatedWidth(e.clientX);
-
-      // Check if we're near snap threshold for visual feedback
-      const defaultWidth = getDefaultChatWidth();
-      const snapThreshold = 3;
-      const isNearSnap = Math.abs(newChatWidth - defaultWidth) <= snapThreshold;
+      const result = calculateValidatedWidth(e.clientX);
 
       setLayoutState((prev) => ({
         ...prev,
-        chatPaneWidth: newChatWidth,
-        dashboardPaneWidth: 100 - newChatWidth,
-        nearSnap: isNearSnap,
+        chatPaneWidth: result.width,
+        dashboardPaneWidth: 100 - result.width,
+        nearSnap: result.nearSnap,
+        atMinConstraint: result.atMinConstraint,
+        atMaxConstraint: result.atMaxConstraint,
       }));
     },
-    [calculateValidatedWidth, getDefaultChatWidth]
+    [calculateValidatedWidth]
   );
 
   // Handle mouse up to end drag
@@ -227,12 +278,35 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
     if (!isDraggingRef.current) return;
 
     isDraggingRef.current = false;
-    setLayoutState((prev) => ({ ...prev, isResizing: false, nearSnap: false }));
+
+    // If we were near snap when releasing, trigger snap animation
+    if (layoutState.nearSnap) {
+      setLayoutState((prev) => ({
+        ...prev,
+        isResizing: false,
+        nearSnap: false,
+        isSnapping: true,
+        atMinConstraint: false,
+        atMaxConstraint: false,
+      }));
+
+      // Clear snapping state after animation
+      setTimeout(() => {
+        setLayoutState((prev) => ({ ...prev, isSnapping: false }));
+      }, 300);
+    } else {
+      setLayoutState((prev) => ({
+        ...prev,
+        isResizing: false,
+        nearSnap: false,
+        atMinConstraint: false,
+        atMaxConstraint: false,
+      }));
+    }
 
     // Remove cursor styles from body
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-  }, []);
+    document.body.classList.remove("resize-cursor-active");
+  }, [layoutState.nearSnap]);
 
   // Add global mouse event listeners for drag functionality
   useEffect(() => {
@@ -247,24 +321,92 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
     }
   }, [layoutState.isResizing, handleMouseMove, handleMouseUp]);
 
+  // Global keyboard shortcuts for layout operations
+  useKeyboardShortcuts({
+    shortcuts: [
+      {
+        key: "r",
+        ctrlKey: true,
+        action: () => {
+          const defaultWidth = getDefaultChatWidth();
+          if (validateContentSizes(defaultWidth)) {
+            setLayoutState((prev) => ({
+              ...prev,
+              chatPaneWidth: defaultWidth,
+              dashboardPaneWidth: 100 - defaultWidth,
+            }));
+          }
+        },
+        description: "Reset layout to default proportions",
+      },
+      {
+        key: "r",
+        metaKey: true,
+        action: () => {
+          const defaultWidth = getDefaultChatWidth();
+          if (validateContentSizes(defaultWidth)) {
+            setLayoutState((prev) => ({
+              ...prev,
+              chatPaneWidth: defaultWidth,
+              dashboardPaneWidth: 100 - defaultWidth,
+            }));
+          }
+        },
+        description: "Reset layout to default proportions",
+      },
+      {
+        key: "m",
+        ctrlKey: true,
+        action: () => {
+          if (validateContentSizes(minChatWidth)) {
+            setLayoutState((prev) => ({
+              ...prev,
+              chatPaneWidth: minChatWidth,
+              dashboardPaneWidth: 100 - minChatWidth,
+            }));
+          }
+        },
+        description: "Maximize dashboard pane",
+      },
+      {
+        key: "m",
+        metaKey: true,
+        action: () => {
+          if (validateContentSizes(minChatWidth)) {
+            setLayoutState((prev) => ({
+              ...prev,
+              chatPaneWidth: minChatWidth,
+              dashboardPaneWidth: 100 - minChatWidth,
+            }));
+          }
+        },
+        description: "Maximize dashboard pane",
+      },
+    ],
+    enabled: currentBreakpoint !== "mobile", // Disable on mobile
+  });
+
   // Handle keyboard navigation for resize handle
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       const step = 5; // 5% steps for keyboard navigation
+      const largeStep = 10; // Larger steps for Shift+Arrow
       let newChatWidth = layoutState.chatPaneWidth;
 
       switch (e.key) {
         case "ArrowLeft":
           e.preventDefault();
+          const leftStep = e.shiftKey ? largeStep : step;
           newChatWidth = Math.max(
-            layoutState.chatPaneWidth - step,
+            layoutState.chatPaneWidth - leftStep,
             minChatWidth
           );
           break;
         case "ArrowRight":
           e.preventDefault();
+          const rightStep = e.shiftKey ? largeStep : step;
           newChatWidth = Math.min(
-            layoutState.chatPaneWidth + step,
+            layoutState.chatPaneWidth + rightStep,
             maxChatWidth
           );
           break;
@@ -275,6 +417,44 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
         case "End":
           e.preventDefault();
           newChatWidth = maxChatWidth;
+          break;
+        case "PageUp":
+          e.preventDefault();
+          newChatWidth = minChatWidth;
+          break;
+        case "PageDown":
+          e.preventDefault();
+          newChatWidth = maxChatWidth;
+          break;
+        case "r":
+        case "R":
+          // Reset to default with 'r' key
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            newChatWidth = getDefaultChatWidth();
+          } else {
+            return;
+          }
+          break;
+        case "m":
+        case "M":
+          // Maximize dashboard pane with Ctrl/Cmd+M
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            newChatWidth = minChatWidth;
+          } else {
+            return;
+          }
+          break;
+        case "c":
+        case "C":
+          // Maximize chat pane with Ctrl/Cmd+C
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            newChatWidth = maxChatWidth;
+          } else {
+            return;
+          }
           break;
         default:
           return;
@@ -317,10 +497,12 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
     <div
       ref={containerRef}
       className={`h-full grid grid-cols-[var(--chat-pane-width)_auto_var(--dashboard-pane-width)] ${className}`}
-      style={{
-        [CSS_VARIABLES.chatWidth]: `${layoutState.chatPaneWidth}%`,
-        [CSS_VARIABLES.dashboardWidth]: `${layoutState.dashboardPaneWidth}%`,
-      }}
+      style={
+        {
+          "--chat-pane-width": `${layoutState.chatPaneWidth}%`,
+          "--dashboard-pane-width": `${layoutState.dashboardPaneWidth}%`,
+        } as React.CSSProperties
+      }
       data-testid="resizable-layout"
     >
       {/* Chat Pane */}
@@ -335,16 +517,17 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
       <div
         ref={dragHandleRef}
         className={`
-          w-1 bg-gray-200 hover:bg-blue-400 cursor-col-resize transition-colors duration-150
+          w-1 bg-gray-200 resize-handle
           flex items-center justify-center relative group
-          ${layoutState.isResizing ? "bg-blue-500" : ""}
-          ${layoutState.nearSnap ? "bg-green-500" : ""}
+          ${layoutState.isResizing ? "dragging" : ""}
+          ${layoutState.nearSnap ? "near-snap" : ""}
+          ${layoutState.isSnapping ? "snapping" : ""}
         `}
         style={{ zIndex: Z_INDEX.resizeHandle }}
         data-testid="resize-handle"
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize chat and dashboard panes. Use arrow keys to adjust size, Home to reset, End to maximize."
+        aria-label="Resize chat and dashboard panes. Arrow keys to adjust (Shift for larger steps), Home to reset, End/PageDown to maximize dashboard, PageUp to minimize chat, Ctrl+R to reset, Ctrl+M to maximize dashboard, Ctrl+C to maximize chat."
         tabIndex={0}
         onMouseDown={handleMouseDown}
         onKeyDown={handleKeyDown}
@@ -355,13 +538,21 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
             className={`
             w-0.5 h-8 transition-colors duration-150
             ${
-              layoutState.nearSnap
+              layoutState.nearSnap || layoutState.isSnapping
                 ? "bg-white"
                 : "bg-gray-400 group-hover:bg-white"
             }
           `}
           />
         </div>
+
+        {/* Constraint indicators */}
+        {layoutState.atMinConstraint && (
+          <div className="resize-constraint-indicator left active" />
+        )}
+        {layoutState.atMaxConstraint && (
+          <div className="resize-constraint-indicator right active" />
+        )}
 
         {/* Expanded hover area for easier grabbing */}
         <div className="absolute inset-y-0 -left-2 -right-2 w-5" />
@@ -375,4 +566,53 @@ const ResizableLayout: React.FC<ResizableLayoutProps> = ({
   );
 };
 
-export default ResizableLayout;
+// Enhanced ResizableLayout with error boundary and performance monitoring
+const EnhancedResizableLayout: React.FC<ResizableLayoutProps> = (props) => {
+  // Skip enhancements in test environment
+  if (process.env.NODE_ENV === "test") {
+    return <ResizableLayout {...props} />;
+  }
+
+  const performanceMonitor = usePerformanceMonitor("ResizableLayout");
+  const { viewport, constraints } = analyzeViewportConstraints();
+
+  // Apply graceful degradation based on constraints
+  const fallbackProps = createFallbackProps("ResizableLayout");
+  const enhancedProps = { ...fallbackProps, ...props };
+
+  // Check for extreme constraints that require fallback
+  if (constraints.includes("extremely-narrow")) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="bg-yellow-50 border-b border-yellow-200 p-2">
+          <p className="text-xs text-yellow-800">
+            Screen too narrow for resizable layout. Using stacked layout.
+          </p>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          <div className="h-1/3 border-b border-gray-200 overflow-auto">
+            {props.chatContent}
+          </div>
+          <div className="h-2/3 overflow-auto">{props.dashboardContent}</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Measure render performance
+  const endMeasure = performanceMonitor.measureRender();
+
+  useEffect(() => {
+    endMeasure();
+  });
+
+  return <ResizableLayout {...enhancedProps} />;
+};
+
+// Wrap with error boundary (skip in tests)
+const ResizableLayoutWithErrorBoundary =
+  process.env.NODE_ENV === "test"
+    ? ResizableLayout
+    : withLayoutErrorBoundary(EnhancedResizableLayout, "ResizableLayout");
+
+export default ResizableLayoutWithErrorBoundary;

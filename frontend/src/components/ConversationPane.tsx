@@ -114,12 +114,12 @@ export default function ConversationPane({
             onChange={(e) => setInput(e.target.value)}
             placeholder={placeholder}
             disabled={isLoading}
-            className="flex-1 px-3 py-2 border border-gray-300 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent disabled:bg-gray-50 disabled:cursor-not-allowed"
+            className="flex-1 px-3 py-2 border border-gray-300 focus:outline-none focus:border-gray-400 active:border-gray-400 disabled:bg-gray-50 disabled:cursor-not-allowed"
           />
           <button
             type="submit"
             disabled={!input.trim() || isLoading}
-            className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+            className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 focus:outline-none active:bg-red-800 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150"
           >
             <svg
               className="w-4 h-4"
@@ -131,7 +131,7 @@ export default function ConversationPane({
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={2}
-                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                d="M12 5l7 7-7 7M5 12h14"
               />
             </svg>
           </button>

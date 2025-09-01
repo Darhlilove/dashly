@@ -1,17 +1,27 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { ToastContainer, LoadingSpinner, ErrorBoundary } from "./components";
-import MainLayout, { Message } from "./components/MainLayout";
+import { Message } from "./types";
+import ResizableLayout from "./components/ResizableLayout";
+import AutoHideSidebar from "./components/AutoHideSidebar";
+import ConversationPane from "./components/ConversationPane";
+import Sidebar from "./components/Sidebar";
 import IntroPage from "./components/IntroPage";
 import DashboardWorkspace from "./components/DashboardWorkspace";
 
 // Lazy load modals
 const SQLPreviewModal = lazy(() => import("./components/SQLPreviewModal"));
 import { AppState, ToastNotification, Dashboard, ApiError } from "./types";
+import { LayoutState, ViewType } from "./types/layout";
 import { apiService } from "./services/api";
 import { selectChartType } from "./utils";
 import { generateId } from "./utils";
 import { useErrorHandler } from "./hooks/useErrorHandler";
 import { useSessionCache } from "./hooks/useSessionCache";
+import { useBreakpoint } from "./hooks/useMediaQuery";
+import { useLayoutPreferences } from "./hooks/useLayoutPreferences";
+import { useUserPreferences } from "./hooks/useUserPreferences";
+import { LAYOUT_CONFIG } from "./config/layout";
+import SettingsModal from "./components/SettingsModal";
 import "./utils/optimization"; // Load optimization checks
 
 // Initial application state
@@ -28,6 +38,16 @@ const initialState: AppState = {
   error: null,
 };
 
+// Initial layout state - will be overridden by preferences
+const getInitialLayoutState = (breakpoint: string): LayoutState => ({
+  sidebarVisible: false,
+  chatPaneWidth: LAYOUT_CONFIG.defaultSizes.desktop.chat,
+  dashboardPaneWidth: LAYOUT_CONFIG.defaultSizes.desktop.dashboard,
+  currentView: "data" as ViewType, // Default to data view as per requirements
+  currentBreakpoint: breakpoint as any,
+  isResizing: false,
+});
+
 function App() {
   const [state, setState] = useState<AppState>(initialState);
   const [notifications, setNotifications] = useState<ToastNotification[]>([]);
@@ -35,6 +55,12 @@ function App() {
   const [currentDashboardId, setCurrentDashboardId] = useState<
     string | undefined
   >();
+
+  // Layout state management
+  const currentBreakpoint = useBreakpoint();
+  const [layoutState, setLayoutState] = useState<LayoutState>(() =>
+    getInitialLayoutState(currentBreakpoint)
+  );
 
   // Global error handler
   const { handleError: handleGlobalError } = useErrorHandler({
@@ -62,6 +88,188 @@ function App() {
 
   const removeNotification = useCallback((id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
+  }, []);
+
+  // Layout preferences management
+  const {
+    loadPreferences,
+    savePreferences,
+    resetPreferences,
+    resetAllPreferences,
+  } = useLayoutPreferences();
+
+  // User preferences management
+  const userPreferences = useUserPreferences();
+
+  // Mobile view state (separate from desktop view state)
+  const [mobileView, setMobileView] = useState<"chat" | "data" | "dashboard">(
+    "chat"
+  );
+
+  // Settings modal state
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+
+  // Initialize layout preferences after hooks are ready
+  useEffect(() => {
+    const preferences = loadPreferences(currentBreakpoint as any);
+    setLayoutState((prev) => ({ ...prev, ...preferences }));
+  }, [loadPreferences, currentBreakpoint]);
+
+  // Layout state handlers
+  const handleSidebarVisibilityChange = useCallback((visible: boolean) => {
+    setLayoutState((prev) => ({ ...prev, sidebarVisible: visible }));
+  }, []);
+
+  const handlePaneResize = useCallback(
+    (chatWidth: number, dashboardWidth: number) => {
+      setLayoutState((prev) => ({
+        ...prev,
+        chatPaneWidth: chatWidth,
+        dashboardPaneWidth: dashboardWidth,
+      }));
+    },
+    []
+  );
+
+  const handleViewChange = useCallback((view: ViewType) => {
+    setLayoutState((prev) => ({ ...prev, currentView: view }));
+  }, []);
+
+  const handleMobileViewChange = useCallback(
+    (view: "chat" | "data" | "dashboard") => {
+      setMobileView(view);
+    },
+    []
+  );
+
+  // Layout preference handlers
+  const handleResetLayoutPreferences = useCallback(() => {
+    const defaultPreferences = resetPreferences(layoutState.currentBreakpoint);
+    setLayoutState((prev) => ({ ...prev, ...defaultPreferences }));
+    addNotification("success", "Layout reset to defaults");
+  }, [layoutState.currentBreakpoint, resetPreferences, addNotification]);
+
+  const handleResetAllLayoutPreferences = useCallback(() => {
+    resetAllPreferences();
+    // Reload preferences for current breakpoint
+    const preferences = loadPreferences(layoutState.currentBreakpoint);
+    setLayoutState((prev) => ({ ...prev, ...preferences }));
+    addNotification("success", "All layout preferences reset to defaults");
+  }, [
+    resetAllPreferences,
+    loadPreferences,
+    layoutState.currentBreakpoint,
+    addNotification,
+  ]);
+
+  // Update layout state when breakpoint changes
+  useEffect(() => {
+    setLayoutState((prev) => {
+      // Load preferences for the new breakpoint
+      const preferences = loadPreferences(currentBreakpoint as any);
+
+      return {
+        ...prev,
+        currentBreakpoint: currentBreakpoint as any,
+        // Only update sizes if not currently resizing
+        ...(prev.isResizing
+          ? {}
+          : {
+              chatPaneWidth: preferences.chatPaneWidth ?? prev.chatPaneWidth,
+              dashboardPaneWidth:
+                preferences.dashboardPaneWidth ?? prev.dashboardPaneWidth,
+              currentView: preferences.currentView ?? prev.currentView,
+              sidebarVisible: preferences.sidebarVisible ?? prev.sidebarVisible,
+            }),
+      };
+    });
+  }, [currentBreakpoint, loadPreferences]);
+
+  // Save layout preferences when layout state changes
+  useEffect(() => {
+    // Don't save during initial render or while resizing
+    if (layoutState.isResizing) return;
+
+    // Save preferences with a small delay to avoid excessive saves
+    const timeoutId = setTimeout(() => {
+      savePreferences(layoutState);
+    }, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [
+    layoutState.chatPaneWidth,
+    layoutState.dashboardPaneWidth,
+    layoutState.currentView,
+    layoutState.sidebarVisible,
+    layoutState.currentBreakpoint,
+    layoutState.isResizing,
+    savePreferences,
+  ]);
+
+  // Apply user preferences to document
+  useEffect(() => {
+    const { preferences, animationsEnabled, effectiveTheme } = userPreferences;
+    const root = document.documentElement;
+    const body = document.body;
+
+    // Apply animation classes
+    if (animationsEnabled) {
+      root.classList.add("animations-enabled");
+      root.classList.remove("animations-disabled");
+    } else {
+      root.classList.add("animations-disabled");
+      root.classList.remove("animations-enabled");
+    }
+
+    // Apply accessibility classes
+    if (preferences.accessibility.highContrast) {
+      body.classList.add("high-contrast");
+    } else {
+      body.classList.remove("high-contrast");
+    }
+
+    if (preferences.accessibility.screenReaderOptimizations) {
+      body.classList.add("screen-reader-optimized");
+    } else {
+      body.classList.remove("screen-reader-optimized");
+    }
+
+    if (preferences.accessibility.keyboardNavigation) {
+      body.classList.add("keyboard-navigation-enhanced");
+    } else {
+      body.classList.remove("keyboard-navigation-enhanced");
+    }
+
+    // Apply UI preferences
+    if (preferences.ui.compactMode) {
+      body.classList.add("compact-mode");
+    } else {
+      body.classList.remove("compact-mode");
+    }
+
+    // Apply theme (for future dark mode support)
+    body.setAttribute("data-theme", effectiveTheme);
+
+    // Apply mobile animation preferences
+    if (currentBreakpoint === "mobile" && !animationsEnabled) {
+      body.classList.add("mobile-no-animations");
+    } else {
+      body.classList.remove("mobile-no-animations");
+    }
+  }, [userPreferences, currentBreakpoint]);
+
+  // Handle orientation changes on mobile/tablet
+  useEffect(() => {
+    const handleOrientationChange = () => {
+      // Force a re-render after orientation change to recalculate layout
+      setTimeout(() => {
+        window.dispatchEvent(new Event("resize"));
+      }, 100);
+    };
+
+    window.addEventListener("orientationchange", handleOrientationChange);
+    return () =>
+      window.removeEventListener("orientationchange", handleOrientationChange);
   }, []);
 
   // Load saved dashboards on app initialization - TEMPORARILY DISABLED
@@ -99,9 +307,6 @@ function App() {
         isLoading: false,
       }));
       addNotification("success", `Successfully uploaded ${file.name}`);
-
-      // Preload query phase components since user will likely query next
-      import("./components/QueryPhase");
     } catch (error) {
       const apiError = error as ApiError;
       setState((prev) => ({
@@ -133,18 +338,43 @@ function App() {
       console.log("App: Response type:", typeof response);
       console.log("App: Response keys:", Object.keys(response || {}));
 
-      setState((prev) => ({
-        ...prev,
-        uploadStatus: "completed",
-        tableInfo: response,
-        isLoading: false,
-      }));
+      // After loading demo data structure, also fetch sample data to display
+      try {
+        console.log("App: Fetching sample demo data for display");
+        const sampleDataResponse = await apiService.executeSQL(
+          `SELECT * FROM ${response.table} LIMIT 100`,
+          "Sample demo data"
+        );
 
-      console.log("App: State updated successfully");
-      addNotification("success", "Demo data loaded successfully");
+        setState((prev) => ({
+          ...prev,
+          uploadStatus: "completed",
+          tableInfo: response,
+          queryResults: sampleDataResponse, // Add sample data for display
+          currentQuery: "Sample demo data",
+          currentSQL: `SELECT * FROM ${response.table} LIMIT 100`,
+          isLoading: false,
+        }));
 
-      // Preload query phase components since user will likely query next
-      import("./components/QueryPhase");
+        console.log("App: State updated with demo data and sample rows");
+        addNotification(
+          "success",
+          "Demo data loaded successfully with sample preview"
+        );
+      } catch (sampleError) {
+        // If sample data fetch fails, still show the table structure
+        console.warn(
+          "App: Failed to fetch sample data, showing structure only:",
+          sampleError
+        );
+        setState((prev) => ({
+          ...prev,
+          uploadStatus: "completed",
+          tableInfo: response,
+          isLoading: false,
+        }));
+        addNotification("success", "Demo data loaded successfully");
+      }
     } catch (error) {
       console.error("App: Demo data error:", error);
       console.error("App: Error type:", typeof error);
@@ -380,7 +610,7 @@ function App() {
 
   // Determine current phase based on application state
   const hasData = state.uploadStatus === "completed" && state.tableInfo;
-  const showConversation = Boolean(hasData);
+  const hasCharts = Boolean(state.currentChart && state.queryResults);
 
   return (
     <div className="h-screen bg-white">
@@ -390,18 +620,25 @@ function App() {
       </a>
 
       <ErrorBoundary level="component" onError={handleGlobalError}>
-        <MainLayout
-          savedDashboards={state.savedDashboards}
-          onLoadDashboard={handleLoadDashboard}
-          onNewDashboard={handleNewDashboard}
-          currentDashboardId={currentDashboardId}
-          messages={messages}
-          onSendMessage={handleQuery}
-          isLoading={state.isLoading}
-          showConversation={showConversation}
+        <AutoHideSidebar
+          isVisible={layoutState.sidebarVisible}
+          onVisibilityChange={handleSidebarVisibilityChange}
+          triggerWidth={LAYOUT_CONFIG.constraints.sidebarTriggerWidth}
+          hideDelay={LAYOUT_CONFIG.constraints.sidebarHideDelay}
+          sidebarContent={
+            <Sidebar
+              isCollapsed={false}
+              onToggle={() => {}} // Not used in auto-hide mode
+              savedDashboards={state.savedDashboards}
+              onLoadDashboard={handleLoadDashboard}
+              onNewDashboard={handleNewDashboard}
+              onSettings={() => setShowSettingsModal(true)}
+              currentDashboardId={currentDashboardId}
+            />
+          }
         >
-          <main id="main-content" role="main" className="h-full">
-            {!hasData ? (
+          {!hasData ? (
+            <main id="main-content" role="main" className="h-full">
               <IntroPage
                 onFileUpload={handleFileUpload}
                 onDemoData={handleDemoData}
@@ -410,18 +647,150 @@ function App() {
                 savedDashboards={state.savedDashboards}
                 onLoadDashboard={handleLoadDashboard}
               />
-            ) : (
-              <DashboardWorkspace
-                tableInfo={state.tableInfo!}
-                queryResults={state.queryResults}
-                currentChart={state.currentChart}
-                currentQuery={state.currentQuery}
-                onSaveDashboard={handleSaveDashboard}
-                isLoading={state.isLoading}
-              />
-            )}
-          </main>
-        </MainLayout>
+            </main>
+          ) : currentBreakpoint === "mobile" ? (
+            // Mobile Layout - Use tabs/slide-over interface
+            <div className="h-full flex flex-col">
+              {/* Mobile Navigation Tabs */}
+              <div className="bg-white border-b border-gray-200 flex">
+                <button
+                  onClick={() => handleMobileViewChange("chat")}
+                  className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    mobileView === "chat"
+                      ? "text-blue-600 border-blue-600 bg-blue-50"
+                      : "text-gray-600 border-transparent hover:text-gray-800 hover:border-gray-300"
+                  }`}
+                >
+                  <span className="flex items-center justify-center gap-2">
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                      />
+                    </svg>
+                    Chat
+                  </span>
+                </button>
+                <button
+                  onClick={() => handleMobileViewChange("data")}
+                  className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                    mobileView === "data"
+                      ? "text-blue-600 border-blue-600 bg-blue-50"
+                      : "text-gray-600 border-transparent hover:text-gray-800 hover:border-gray-300"
+                  }`}
+                >
+                  <span className="flex items-center justify-center gap-2">
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                      />
+                    </svg>
+                    Data
+                  </span>
+                </button>
+                {hasCharts && (
+                  <button
+                    onClick={() => handleMobileViewChange("dashboard")}
+                    className={`flex-1 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                      mobileView === "dashboard"
+                        ? "text-blue-600 border-blue-600 bg-blue-50"
+                        : "text-gray-600 border-transparent hover:text-gray-800 hover:border-gray-300"
+                    }`}
+                  >
+                    <span className="flex items-center justify-center gap-2">
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                        />
+                      </svg>
+                      Charts
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              {/* Mobile Content */}
+              <main
+                id="main-content"
+                role="main"
+                className="flex-1 overflow-hidden"
+              >
+                {mobileView === "chat" ? (
+                  <ConversationPane
+                    messages={messages}
+                    onSendMessage={handleQuery}
+                    isLoading={state.isLoading}
+                  />
+                ) : (
+                  <DashboardWorkspace
+                    tableInfo={state.tableInfo!}
+                    queryResults={state.queryResults}
+                    currentChart={state.currentChart}
+                    currentQuery={state.currentQuery}
+                    onSaveDashboard={handleSaveDashboard}
+                    isLoading={state.isLoading}
+                    currentView={
+                      mobileView === "dashboard" ? "dashboard" : "data"
+                    }
+                    onViewChange={handleViewChange}
+                  />
+                )}
+              </main>
+            </div>
+          ) : (
+            // Desktop/Tablet Layout - Use ResizableLayout
+            <ResizableLayout
+              initialChatWidth={layoutState.chatPaneWidth}
+              onResize={handlePaneResize}
+              minChatWidth={LAYOUT_CONFIG.constraints.minChatWidth}
+              maxChatWidth={LAYOUT_CONFIG.constraints.maxChatWidth}
+              chatContent={
+                <ConversationPane
+                  messages={messages}
+                  onSendMessage={handleQuery}
+                  isLoading={state.isLoading}
+                />
+              }
+              dashboardContent={
+                <main id="main-content" role="main" className="h-full">
+                  <DashboardWorkspace
+                    tableInfo={state.tableInfo!}
+                    queryResults={state.queryResults}
+                    currentChart={state.currentChart}
+                    currentQuery={state.currentQuery}
+                    onSaveDashboard={handleSaveDashboard}
+                    isLoading={state.isLoading}
+                    currentView={layoutState.currentView}
+                    onViewChange={handleViewChange}
+                  />
+                </main>
+              }
+            />
+          )}
+        </AutoHideSidebar>
       </ErrorBoundary>
 
       {/* SQL Preview Modal */}
@@ -446,6 +815,15 @@ function App() {
           </Suspense>
         </ErrorBoundary>
       )}
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        currentLayoutState={layoutState}
+        onLayoutReset={handleResetLayoutPreferences}
+        onAllLayoutReset={handleResetAllLayoutPreferences}
+      />
 
       {/* Toast Notifications */}
       <ToastContainer

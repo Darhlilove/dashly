@@ -15,7 +15,7 @@ interface State {
 }
 
 class ErrorBoundary extends Component<Props, State> {
-  private retryTimeoutId: NodeJS.Timeout | null = null;
+  private retryTimeoutId: number | null = null;
 
   constructor(props: Props) {
     super(props);
@@ -122,11 +122,11 @@ class ErrorBoundary extends Component<Props, State> {
       // Component-level error boundary (smaller, inline error)
       if (!isPageLevel) {
         return (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 my-4">
+          <div className="bg-white border border-red-600 p-4 my-4">
             <div className="flex items-start">
               <div className="flex-shrink-0">
                 <svg
-                  className="h-5 w-5 text-red-400"
+                  className="h-5 w-5 text-red-600"
                   viewBox="0 0 20 20"
                   fill="currentColor"
                 >
@@ -138,15 +138,15 @@ class ErrorBoundary extends Component<Props, State> {
                 </svg>
               </div>
               <div className="ml-3 flex-1">
-                <h3 className="text-sm font-medium text-red-800">
+                <h3 className="text-sm font-medium text-black">
                   Component Error
                 </h3>
-                <p className="mt-1 text-sm text-red-700">{errorMessage}</p>
+                <p className="mt-1 text-sm text-black">{errorMessage}</p>
                 <div className="mt-3 flex space-x-3">
                   {canRetry && (
                     <button
                       onClick={this.handleRetry}
-                      className="text-sm font-medium text-red-800 hover:text-red-900 underline"
+                      className="text-sm font-medium text-red-600 hover:text-red-700 underline"
                     >
                       Try Again ({maxRetries - this.state.retryCount} attempts
                       left)
@@ -154,7 +154,7 @@ class ErrorBoundary extends Component<Props, State> {
                   )}
                   <button
                     onClick={this.handleRefresh}
-                    className="text-sm font-medium text-red-800 hover:text-red-900 underline"
+                    className="text-sm font-medium text-red-600 hover:text-red-700 underline"
                   >
                     Refresh Page
                   </button>
@@ -167,26 +167,26 @@ class ErrorBoundary extends Component<Props, State> {
 
       // Page-level error boundary (full page error)
       return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-          <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg p-6">
+        <div className="min-h-screen bg-white flex items-center justify-center px-4">
+          <div className="max-w-md mx-auto bg-white border border-black p-6">
             <div className="text-center">
               <div
-                className="text-red-500 text-6xl mb-4"
+                className="text-red-600 text-6xl mb-4"
                 role="img"
                 aria-label="Error"
               >
                 ⚠️
               </div>
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">
+              <h1 className="text-2xl font-bold text-black mb-2">
                 Oops! Something went wrong
               </h1>
-              <p className="text-gray-600 mb-6">{errorMessage}</p>
+              <p className="text-black mb-6">{errorMessage}</p>
 
               <div className="space-y-3">
                 {canRetry && (
                   <button
                     onClick={this.handleRetry}
-                    className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+                    className="w-full px-4 py-2 bg-red-600 text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors"
                   >
                     Try Again ({maxRetries - this.state.retryCount} attempts
                     left)
@@ -195,14 +195,14 @@ class ErrorBoundary extends Component<Props, State> {
 
                 <button
                   onClick={this.handleRefresh}
-                  className="w-full px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors"
+                  className="w-full px-4 py-2 bg-black text-white hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors"
                 >
                   Refresh Page
                 </button>
 
                 <button
                   onClick={this.handleGoHome}
-                  className="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors"
+                  className="w-full px-4 py-2 bg-white text-black border border-black hover:bg-black hover:text-white focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors"
                 >
                   Go to Home
                 </button>
@@ -210,10 +210,10 @@ class ErrorBoundary extends Component<Props, State> {
 
               {/* Error details for debugging */}
               <details className="mt-6 text-left">
-                <summary className="cursor-pointer text-sm text-gray-500 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 rounded">
-                  Show technical details
+                <summary className="cursor-pointer text-sm text-black hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-500">
+                  ▼ Show technical details
                 </summary>
-                <div className="mt-3 p-3 bg-gray-100 rounded text-xs font-mono text-gray-700 overflow-auto max-h-40 text-left">
+                <div className="mt-3 p-3 bg-white border border-black text-xs font-mono text-black overflow-auto max-h-40 text-left">
                   <div className="mb-2">
                     <strong>Error:</strong> {this.state.error?.message}
                   </div>

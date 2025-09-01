@@ -66,8 +66,9 @@ describe("AutoHideSidebar", () => {
     const sidebarElement = screen.getByTestId("sidebar-content");
     const sidebarContainer = sidebarElement.parentElement;
 
-    // The sidebar container should have the transform class
-    expect(sidebarContainer).toHaveClass("-translate-x-full");
+    // The sidebar container should have the slide-out class and transform style
+    expect(sidebarContainer).toHaveClass("sidebar-slide-out");
+    expect(sidebarContainer).toHaveStyle("transform: translateX(-100%)");
   });
 
   it("calls onVisibilityChange when mouse enters trigger zone", async () => {

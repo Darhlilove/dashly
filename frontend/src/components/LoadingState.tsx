@@ -44,7 +44,7 @@ const LoadingState: React.FC<LoadingStateProps> = ({
     }, 1000);
 
     // Set timeout if specified
-    let timeoutId: NodeJS.Timeout | undefined;
+    let timeoutId: number | undefined;
     if (timeout) {
       timeoutId = setTimeout(() => {
         setTimeoutReached(true);
