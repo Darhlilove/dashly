@@ -6,3 +6,18 @@ import "@testing-library/jest-dom";
   unobserve() {}
   disconnect() {}
 };
+
+// Mock matchMedia for useMediaQuery hook
+Object.defineProperty(window, "matchMedia", {
+  writable: true,
+  value: (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => {},
+  }),
+});

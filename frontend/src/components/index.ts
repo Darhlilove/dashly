@@ -25,3 +25,5 @@ export { default as ConversationPane } from "./ConversationPane";
 export { default as IntroPage } from "./IntroPage";
 export { default as DashboardWorkspace } from "./DashboardWorkspace";
 export { default as ResizableLayout } from "./ResizableLayout";
+export { default as AutoHideSidebar } from "./AutoHideSidebar";
+export { default as DataTableView } from "./DataTableView";
