@@ -25,6 +25,24 @@ export interface ApiError {
   requestId?: string;
 }
 
+// Enhanced error interface for automatic execution
+export interface ExecutionError extends ApiError {
+  phase: "translation" | "execution" | "network";
+  originalError: ApiError;
+  userFriendlyMessage: string;
+  suggestions: string[];
+  retryable: boolean;
+  recoveryActions?: RecoveryAction[];
+}
+
+// Recovery action interface for error handling
+export interface RecoveryAction {
+  type: "retry" | "rephrase" | "simplify" | "contact_support";
+  label: string;
+  description: string;
+  action?: () => void;
+}
+
 export interface RetryableError extends ApiError {
   retryable: true;
   retryAfter?: number; // seconds to wait before retry
@@ -50,4 +68,21 @@ export interface ValidationError extends ApiError {
 export interface ServerError extends ApiError {
   code: "INTERNAL_ERROR" | "SERVICE_UNAVAILABLE" | "DATABASE_ERROR";
   retryable: boolean;
+}
+
+// Execution state management for automatic execution
+export type ExecutionState =
+  | { phase: "idle" }
+  | { phase: "translating"; query: string }
+  | { phase: "translated"; sql: string; query: string }
+  | { phase: "executing"; sql: string; query: string }
+  | { phase: "completed"; results: ExecuteResponse; sql: string; query: string }
+  | { phase: "failed"; error: string; sql?: string; query: string };
+
+// Result type for automatic execution flow
+export interface AutomaticExecutionResult {
+  translationResult: TranslateResponse;
+  executionResult: ExecuteResponse;
+  executionTime: number;
+  fromCache: boolean;
 }

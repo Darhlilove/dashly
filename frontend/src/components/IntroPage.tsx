@@ -97,6 +97,7 @@ export default function IntroPage({
                   }}
                   disabled={isLoading}
                   className="btn-secondary"
+                  data-testid="demo-data-button"
                 >
                   {isLoading ? "Loading..." : "Use Demo Data"}
                 </button>

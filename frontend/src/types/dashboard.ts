@@ -23,6 +23,10 @@ export interface AppState {
   showSQLModal: boolean;
   isLoading: boolean;
   error: string | null;
+  // New fields for automatic execution
+  executionMode: "automatic" | "advanced";
+  isExecutingQuery: boolean;
+  lastExecutionTime?: number;
 }
 
 export interface ToastNotification {

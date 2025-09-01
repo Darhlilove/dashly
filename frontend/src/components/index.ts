@@ -28,3 +28,4 @@ export { default as AutoHideSidebar } from "./AutoHideSidebar";
 export { default as DataTableView } from "./DataTableView";
 export { default as ViewToggle } from "./ViewToggle";
 export { default as ViewTransition } from "./ViewTransition";
+export { default as AdvancedModeToggle } from "./AdvancedModeToggle";

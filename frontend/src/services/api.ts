@@ -6,6 +6,8 @@ import {
   TranslateResponse,
   ExecuteResponse,
   ApiError,
+  AutomaticExecutionResult,
+  ExecutionError,
 } from "../types/api";
 import { Dashboard } from "../types/dashboard";
 import { sessionCache } from "../utils/cache";
@@ -85,14 +87,34 @@ class ApiService {
       let retryable = false;
       let code: string;
 
+      // Enhanced error detection for SQL and translation errors
+      const errorText = responseData?.message || responseData?.detail || "";
+      const isColumnError =
+        errorText.toLowerCase().includes("column") &&
+        (errorText.toLowerCase().includes("not found") ||
+          errorText.toLowerCase().includes("does not exist"));
+      const isSyntaxError =
+        errorText.toLowerCase().includes("syntax error") ||
+        errorText.toLowerCase().includes("invalid sql");
+      const isTimeoutError =
+        errorText.toLowerCase().includes("timeout") ||
+        errorText.toLowerCase().includes("time limit");
+
       switch (status) {
         case 400:
-          message =
-            responseData?.message ||
-            responseData?.detail ||
-            "Invalid request. Please check your input.";
-          code = "VALIDATION_ERROR";
-          retryable = false;
+          if (isColumnError) {
+            message = errorText;
+            code = "COLUMN_NOT_FOUND";
+            retryable = false;
+          } else if (isSyntaxError) {
+            message = errorText;
+            code = "INVALID_SQL";
+            retryable = false;
+          } else {
+            message = errorText || "Invalid request. Please check your input.";
+            code = "VALIDATION_ERROR";
+            retryable = false;
+          }
           break;
         case 401:
           message = "Authentication required. Please log in.";
@@ -102,7 +124,7 @@ class ApiService {
         case 403:
           message =
             "Access denied. You don't have permission to perform this action.";
-          code = "AUTHORIZATION_ERROR";
+          code = "PERMISSION_DENIED";
           retryable = false;
           break;
         case 404:
@@ -121,12 +143,22 @@ class ApiService {
           retryable = false;
           break;
         case 422:
-          message =
-            responseData?.message ||
-            responseData?.detail ||
-            "Invalid data format.";
-          code = "VALIDATION_ERROR";
-          retryable = false;
+          if (isSyntaxError) {
+            message = this.getUserFriendlyMessage(errorText, "sql_error");
+            code = "INVALID_SQL";
+            retryable = false;
+          } else if (errorText.toLowerCase().includes("translation")) {
+            message = this.getUserFriendlyMessage(
+              errorText,
+              "translation_error"
+            );
+            code = "TRANSLATION_FAILED";
+            retryable = false;
+          } else {
+            message = errorText || "Invalid data format.";
+            code = "VALIDATION_ERROR";
+            retryable = false;
+          }
           break;
         case 429:
           message = "Too many requests. Please wait a moment and try again.";
@@ -134,9 +166,15 @@ class ApiService {
           retryable = true;
           break;
         case 500:
-          message = "Internal server error. Please try again later.";
-          code = "INTERNAL_ERROR";
-          retryable = true;
+          if (isTimeoutError) {
+            message = "Query timeout. The query is taking too long to execute.";
+            code = "TIMEOUT_ERROR";
+            retryable = false;
+          } else {
+            message = "Internal server error. Please try again later.";
+            code = "INTERNAL_ERROR";
+            retryable = true;
+          }
           break;
         case 502:
           message = "Service temporarily unavailable. Please try again.";
@@ -154,10 +192,7 @@ class ApiService {
           retryable = true;
           break;
         default:
-          message =
-            responseData?.message ||
-            responseData?.detail ||
-            `Server error: ${status}`;
+          message = errorText || `Server error: ${status}`;
           code = `HTTP_${status}`;
           retryable = status >= 500;
       }
@@ -174,8 +209,7 @@ class ApiService {
       // Request made but no response received
       if (error.code === "ECONNABORTED") {
         return {
-          message:
-            "Request timeout. Please check your connection and try again.",
+          message: this.getUserFriendlyMessage("", "timeout_error"),
           code: "TIMEOUT_ERROR",
           retryable: true,
           timestamp,
@@ -184,8 +218,7 @@ class ApiService {
       }
 
       return {
-        message:
-          "Network error: Unable to connect to server. Please check your internet connection.",
+        message: this.getUserFriendlyMessage("", "network_error"),
         code: "NETWORK_ERROR",
         retryable: true,
         timestamp,
@@ -200,6 +233,47 @@ class ApiService {
         timestamp,
         requestId,
       };
+    }
+  }
+
+  // Helper method to convert technical errors to user-friendly messages
+  private getUserFriendlyMessage(errorText: string, errorType: string): string {
+    const lowerError = errorText.toLowerCase();
+
+    switch (errorType) {
+      case "sql_error":
+        if (
+          lowerError.includes("column") &&
+          (lowerError.includes("not found") ||
+            lowerError.includes("does not exist"))
+        ) {
+          return "The data doesn't contain a column mentioned in your question. Try asking about different fields or check what data is available.";
+        }
+        if (lowerError.includes("syntax error")) {
+          return "There was an issue with the generated query. Try rephrasing your question in simpler terms.";
+        }
+        if (lowerError.includes("table") && lowerError.includes("not found")) {
+          return "The data table couldn't be found. Make sure you've uploaded data first.";
+        }
+        return "There was an issue with your query. Try asking in a different way or be more specific about what you want to see.";
+
+      case "translation_error":
+        if (lowerError.includes("understand") || lowerError.includes("parse")) {
+          return "I couldn't understand your question. Try using simpler language or be more specific about what data you want to see.";
+        }
+        if (lowerError.includes("ambiguous")) {
+          return "Your question could mean several things. Try being more specific about what you want to analyze.";
+        }
+        return "I had trouble translating your question. Try rephrasing it or asking about specific data fields.";
+
+      case "network_error":
+        return "Connection issue. Please check your internet connection and try again.";
+
+      case "timeout_error":
+        return "The request is taking too long. Try asking a simpler question or check your connection.";
+
+      default:
+        return errorText || "Something went wrong. Please try again.";
     }
   }
 
@@ -323,10 +397,7 @@ class ApiService {
       console.log("API: Fetch completed!");
       console.log("API: Response status:", response.status);
       console.log("API: Response statusText:", response.statusText);
-      console.log(
-        "API: Response headers:",
-        Object.fromEntries(response.headers.entries())
-      );
+      console.log("API: Response headers:", response.headers);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -430,6 +501,217 @@ class ApiService {
       });
     }
   );
+
+  // Execute query automatically: translate and execute in one flow
+  executeQueryAutomatically = measurePerformance(
+    "api_executeQueryAutomatically",
+    async (query: string): Promise<AutomaticExecutionResult> => {
+      if (!query.trim()) {
+        throw this.createExecutionError(
+          "translation",
+          {
+            message: "Please enter a question about your data.",
+            code: "EMPTY_QUERY",
+          } as ApiError,
+          "Please enter a question about your data.",
+          [
+            "Try asking something like 'Show me sales by month'",
+            "Ask about trends, comparisons, or summaries in your data",
+            "Be specific about what you want to see",
+          ]
+        );
+      }
+
+      const startTime = performance.now();
+      const performanceMetrics = {
+        cacheCheckTime: 0,
+        translationTime: 0,
+        executionTime: 0,
+        cacheStoreTime: 0,
+        totalApiTime: 0,
+      };
+
+      let translationResult: TranslateResponse;
+      let executionResult: ExecuteResponse;
+      let fromCache = false;
+
+      try {
+        // Step 1: Check cache first for the complete query with performance tracking
+        const cacheCheckStart = performance.now();
+        const cached = sessionCache.getCachedQueryResult("", query);
+        performanceMetrics.cacheCheckTime = performance.now() - cacheCheckStart;
+
+        if (cached) {
+          console.log("🚀 API: Using cached automatic execution result");
+          performanceMetrics.totalApiTime = performance.now() - startTime;
+
+          // Log API performance for cached result
+          console.log(
+            `📊 API Cache Performance: ${performanceMetrics.cacheCheckTime.toFixed(
+              2
+            )}ms check, ${performanceMetrics.totalApiTime.toFixed(2)}ms total`
+          );
+
+          // For cached results, we need to reconstruct the translation result
+          // This is a limitation of the current cache structure
+          return {
+            translationResult: { sql: "-- Cached result --" },
+            executionResult: cached,
+            executionTime: performanceMetrics.totalApiTime,
+            fromCache: true,
+          };
+        }
+
+        // Step 2: Translate natural language to SQL with performance tracking
+        try {
+          const translationStart = performance.now();
+          translationResult = await this.translateQuery(query);
+          performanceMetrics.translationTime =
+            performance.now() - translationStart;
+        } catch (error) {
+          throw this.createExecutionError(
+            "translation",
+            error as ApiError,
+            "I couldn't understand your question. Could you try rephrasing it?",
+            [
+              "Try using simpler language",
+              "Be more specific about what data you want to see",
+              "Check if your question relates to the uploaded data",
+              "Example: 'Show me total sales by month'",
+            ]
+          );
+        }
+
+        // Step 3: Execute the generated SQL with performance tracking
+        try {
+          const executionStart = performance.now();
+          executionResult = await this.executeSQL(translationResult.sql, query);
+          performanceMetrics.executionTime = performance.now() - executionStart;
+        } catch (error) {
+          throw this.createExecutionError(
+            "execution",
+            error as ApiError,
+            "There was a problem running your query. The data might not contain what you're looking for.",
+            [
+              "Try asking about different columns or data",
+              "Check if the data contains the information you're looking for",
+              "Try a simpler question first",
+              "Make sure your question matches the available data",
+            ]
+          );
+        }
+
+        // Step 4: Cache the successful result with performance tracking
+        const cacheStoreStart = performance.now();
+        sessionCache.cacheQueryResult(
+          translationResult.sql,
+          query,
+          executionResult
+        );
+        performanceMetrics.cacheStoreTime = performance.now() - cacheStoreStart;
+
+        performanceMetrics.totalApiTime = performance.now() - startTime;
+
+        // Log comprehensive API performance metrics
+        console.group("🔧 API Automatic Execution Performance");
+        console.log(
+          `🗄️  Cache check: ${performanceMetrics.cacheCheckTime.toFixed(2)}ms`
+        );
+        console.log(
+          `🔤 Translation: ${performanceMetrics.translationTime.toFixed(2)}ms`
+        );
+        console.log(
+          `⚡ SQL execution: ${performanceMetrics.executionTime.toFixed(2)}ms`
+        );
+        console.log(
+          `💾 Cache store: ${performanceMetrics.cacheStoreTime.toFixed(2)}ms`
+        );
+        console.log(
+          `🏁 Total API time: ${performanceMetrics.totalApiTime.toFixed(2)}ms`
+        );
+        console.log(`📋 Rows returned: ${executionResult.row_count}`);
+        console.log(`⏱️  Backend execution: ${executionResult.runtime_ms}ms`);
+
+        // Performance analysis
+        const backendVsFrontend =
+          performanceMetrics.totalApiTime - executionResult.runtime_ms;
+        console.log(
+          `🔄 Network + processing overhead: ${backendVsFrontend.toFixed(2)}ms`
+        );
+
+        if (performanceMetrics.translationTime > 3000) {
+          console.warn("⚠️  Slow translation detected in API (>3s)");
+        }
+        if (performanceMetrics.executionTime > 5000) {
+          console.warn("⚠️  Slow execution detected in API (>5s)");
+        }
+        if (performanceMetrics.cacheStoreTime > 100) {
+          console.warn("⚠️  Slow cache store detected (>100ms)");
+        }
+
+        console.groupEnd();
+
+        return {
+          translationResult,
+          executionResult,
+          executionTime: performanceMetrics.totalApiTime,
+          fromCache,
+        };
+      } catch (error) {
+        // Log error performance
+        const errorTime = performance.now() - startTime;
+        console.error(`❌ API Error after ${errorTime.toFixed(2)}ms:`, error);
+
+        // If it's already an ExecutionError, re-throw it
+        if (this.isExecutionError(error)) {
+          throw error;
+        }
+
+        // Handle unexpected errors
+        throw this.createExecutionError(
+          "execution",
+          error as ApiError,
+          "Something unexpected happened. Please try again.",
+          [
+            "Try refreshing the page",
+            "Check your internet connection",
+            "Try a different question",
+            "Contact support if the problem persists",
+          ]
+        );
+      }
+    }
+  );
+
+  // Helper method to create user-friendly execution errors
+  private createExecutionError(
+    phase: "translation" | "execution" | "network",
+    originalError: ApiError,
+    userFriendlyMessage: string,
+    suggestions: string[]
+  ): ExecutionError {
+    return {
+      phase,
+      originalError,
+      userFriendlyMessage,
+      suggestions,
+      message: userFriendlyMessage,
+      code: originalError.code || "EXECUTION_ERROR",
+      retryable: originalError.retryable || false,
+      timestamp: new Date().toISOString(),
+      requestId: originalError.requestId || `req_${Date.now()}`,
+    };
+  }
+
+  // Helper method to check if an error is an ExecutionError
+  private isExecutionError(error: any): error is ExecutionError {
+    return (
+      error &&
+      typeof error === "object" &&
+      "phase" in error &&
+      "userFriendlyMessage" in error
+    );
+  }
 
   // Save dashboard configuration with retry logic
   saveDashboard = measurePerformance(

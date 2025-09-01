@@ -137,6 +137,48 @@ class TestApiService {
     return Promise.resolve({ id, name: "Test Dashboard" });
   }
 
+  async executeQueryAutomatically(query: string): Promise<any> {
+    if (!query.trim()) {
+      throw {
+        phase: "translation",
+        originalError: {
+          message: "Please enter a question about your data.",
+          code: "EMPTY_QUERY",
+        },
+        userFriendlyMessage: "Please enter a question about your data.",
+        suggestions: [
+          "Try asking something like 'Show me sales by month'",
+          "Ask about trends, comparisons, or summaries in your data",
+          "Be specific about what you want to see",
+        ],
+        message: "Please enter a question about your data.",
+        code: "EMPTY_QUERY",
+        retryable: false,
+      };
+    }
+
+    // Simulate successful automatic execution
+    const translationResult = {
+      sql: "SELECT * FROM test WHERE category = 'sales'",
+    };
+    const executionResult = {
+      columns: ["month", "sales"],
+      rows: [
+        ["January", 1000],
+        ["February", 1200],
+      ],
+      row_count: 2,
+      runtime_ms: 150,
+    };
+
+    return Promise.resolve({
+      translationResult,
+      executionResult,
+      executionTime: 250,
+      fromCache: false,
+    });
+  }
+
   // Test error handling with different error types
   testErrorHandling(errorType: string): ApiError {
     let mockError: any;
@@ -356,6 +398,41 @@ describe("ApiService Error Handling", () => {
     it("should get dashboard by valid ID", async () => {
       const result = await testApiService.getDashboard("123");
       expect(result).toEqual({ id: "123", name: "Test Dashboard" });
+    });
+
+    it("should execute query automatically with valid input", async () => {
+      const result = await testApiService.executeQueryAutomatically(
+        "show me sales by month"
+      );
+      expect(result).toMatchObject({
+        translationResult: { sql: expect.any(String) },
+        executionResult: {
+          columns: expect.any(Array),
+          rows: expect.any(Array),
+          row_count: expect.any(Number),
+          runtime_ms: expect.any(Number),
+        },
+        executionTime: expect.any(Number),
+        fromCache: expect.any(Boolean),
+      });
+    });
+  });
+
+  describe("Automatic execution error handling", () => {
+    it("should handle empty query in automatic execution", async () => {
+      try {
+        await testApiService.executeQueryAutomatically("   ");
+      } catch (error) {
+        const executionError = error as any;
+        expect(executionError.phase).toBe("translation");
+        expect(executionError.userFriendlyMessage).toBe(
+          "Please enter a question about your data."
+        );
+        expect(executionError.suggestions).toBeInstanceOf(Array);
+        expect(executionError.suggestions.length).toBeGreaterThan(0);
+        expect(executionError.code).toBe("EMPTY_QUERY");
+        expect(executionError.retryable).toBe(false);
+      }
     });
   });
 });

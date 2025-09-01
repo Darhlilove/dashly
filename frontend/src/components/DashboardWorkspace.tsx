@@ -14,6 +14,7 @@ interface DashboardWorkspaceProps {
   currentChart: ChartConfig | null;
   currentQuery: string;
   onSaveDashboard: (name: string) => void;
+  onNewQuery?: () => void;
   isLoading: boolean;
   currentView: ViewType;
   onViewChange: (view: ViewType) => void;
@@ -51,29 +52,30 @@ export default function DashboardWorkspace({
               currentView={currentView}
               onViewChange={onViewChange}
               hasCharts={hasCharts}
-              disabled={isLoading}
             />
 
-            {hasCharts && currentView === "dashboard" && (
-              <button
-                onClick={() => {
-                  const name = prompt("Enter dashboard name:");
-                  if (name) {
-                    onSaveDashboard(name);
-                  }
-                }}
-                disabled={isLoading}
-                className="btn-primary"
-              >
-                Save Dashboard
-              </button>
-            )}
+            <div className="flex gap-2">
+              {hasCharts && currentView === "dashboard" && (
+                <button
+                  onClick={() => {
+                    const name = prompt("Enter dashboard name:");
+                    if (name) {
+                      onSaveDashboard(name);
+                    }
+                  }}
+                  disabled={isLoading}
+                  className="btn-primary"
+                >
+                  Save Dashboard
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
       {/* Content with smooth transitions */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1">
         <ViewTransition
           currentView={currentView}
           isLoading={isLoading}
@@ -138,7 +140,7 @@ export default function DashboardWorkspace({
           dataContent={
             // Data Table View
             <div className="h-full flex flex-col">
-              <div className="flex-1 p-4">
+              <div className="flex-1 p-4 min-h-0">
                 <DataTableView
                   tableInfo={tableInfo}
                   data={queryResults?.rows || []}

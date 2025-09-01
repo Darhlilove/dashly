@@ -10,11 +10,27 @@ import DashboardWorkspace from "./components/DashboardWorkspace";
 
 // Lazy load modals
 const SQLPreviewModal = lazy(() => import("./components/SQLPreviewModal"));
-import { AppState, ToastNotification, Dashboard, ApiError } from "./types";
+import {
+  AppState,
+  ToastNotification,
+  Dashboard,
+  ApiError,
+  ExecuteResponse,
+  SQLMessage,
+  ExecutionStatusMessage,
+} from "./types";
 import { LayoutState, ViewType } from "./types/layout";
 import { apiService } from "./services/api";
 import { selectChartType } from "./utils";
 import { generateId } from "./utils";
+import {
+  createUserFriendlyError,
+  createErrorMessage,
+  enhanceErrorMessage,
+  generateContextualSuggestions,
+  shouldAutoRetry,
+  calculateRetryDelay,
+} from "./utils/errorHandling";
 import { useErrorHandler } from "./hooks/useErrorHandler";
 import { useSessionCache } from "./hooks/useSessionCache";
 import { useBreakpoint } from "./hooks/useMediaQuery";
@@ -22,6 +38,9 @@ import { useLayoutPreferences } from "./hooks/useLayoutPreferences";
 import { useUserPreferences } from "./hooks/useUserPreferences";
 import { LAYOUT_CONFIG } from "./config/layout";
 import SettingsModal from "./components/SettingsModal";
+import { performanceMonitor } from "./utils/performance";
+import { usePerformanceMonitor } from "./utils/performanceMonitor";
+import { useAutomaticExecutionPerformance } from "./hooks/useAutomaticExecutionPerformance";
 import "./utils/optimization"; // Load optimization checks
 
 // Initial application state
@@ -36,6 +55,10 @@ const initialState: AppState = {
   showSQLModal: false,
   isLoading: false,
   error: null,
+  // New fields for automatic execution
+  executionMode: "automatic", // Default to automatic mode
+  isExecutingQuery: false,
+  lastExecutionTime: undefined,
 };
 
 // Initial layout state - will be overridden by preferences
@@ -61,6 +84,23 @@ function App() {
   const [layoutState, setLayoutState] = useState<LayoutState>(() =>
     getInitialLayoutState(currentBreakpoint)
   );
+
+  // Performance monitoring for App component
+  const {
+    measureRender,
+    measureFunction,
+    measureAsync,
+    getMetrics,
+    getAveragePerformance,
+  } = usePerformanceMonitor("App");
+
+  // Automatic execution performance monitoring
+  const {
+    recordExecution,
+    getMetrics: getExecutionMetrics,
+    logPerformanceSummary,
+    getPerformanceRecommendations,
+  } = useAutomaticExecutionPerformance();
 
   // Global error handler
   const { handleError: handleGlobalError } = useErrorHandler({
@@ -206,7 +246,7 @@ function App() {
     savePreferences,
   ]);
 
-  // Apply user preferences to document
+  // Apply user preferences to document and sync execution mode
   useEffect(() => {
     const { preferences, animationsEnabled, effectiveTheme } = userPreferences;
     const root = document.documentElement;
@@ -256,7 +296,16 @@ function App() {
     } else {
       body.classList.remove("mobile-no-animations");
     }
-  }, [userPreferences, currentBreakpoint]);
+
+    // Sync execution mode from user preferences
+    const savedExecutionMode = preferences.ui.executionMode;
+    if (savedExecutionMode && savedExecutionMode !== state.executionMode) {
+      setState((prev) => ({
+        ...prev,
+        executionMode: savedExecutionMode,
+      }));
+    }
+  }, [userPreferences, currentBreakpoint, state.executionMode]);
 
   // Handle orientation changes on mobile/tablet
   useEffect(() => {
@@ -414,43 +463,515 @@ function App() {
       error: null,
     }));
 
-    try {
-      const response = await apiService.translateQuery(query);
+    // Check execution mode to determine flow
+    if (state.executionMode === "automatic") {
+      await executeQueryAutomatically(query);
+    } else {
+      // Advanced mode - show SQL preview modal
+      try {
+        const response = await apiService.translateQuery(query);
 
-      // Add assistant message with SQL
-      const assistantMessage: Message = {
-        id: generateId(),
-        type: "assistant",
-        content: `I've generated this SQL query for you:\n\n\`\`\`sql\n${response.sql}\n\`\`\`\n\nWould you like me to execute it?`,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
+        // Add assistant message with SQL
+        const assistantMessage: Message = {
+          id: generateId(),
+          type: "assistant",
+          content: `I've generated this SQL query for you:\n\n\`\`\`sql\n${response.sql}\n\`\`\`\n\nWould you like me to execute it?`,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, assistantMessage]);
 
-      setState((prev) => ({
-        ...prev,
-        currentSQL: response.sql,
-        showSQLModal: true,
-        isLoading: false,
-      }));
-    } catch (error) {
-      const apiError = error as ApiError;
+        setState((prev) => ({
+          ...prev,
+          currentSQL: response.sql,
+          showSQLModal: true,
+          isLoading: false,
+        }));
+      } catch (error) {
+        const apiError = error as ApiError;
 
-      // Add error message
-      const errorMessage: Message = {
-        id: generateId(),
-        type: "assistant",
-        content: `Sorry, I couldn't translate your query: ${apiError.message}`,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+        // Create enhanced error for translation phase
+        const executionError = createUserFriendlyError(
+          apiError,
+          "translation",
+          query
+        );
 
-      setState((prev) => ({
-        ...prev,
-        error: apiError.message,
-        isLoading: false,
-      }));
-      addNotification("error", `Query translation failed: ${apiError.message}`);
+        // Create recovery actions for advanced mode
+        const recoveryActions = executionError.recoveryActions?.map(
+          (action) => ({
+            ...action,
+            action: () => {
+              switch (action.type) {
+                case "retry":
+                  if (executionError.retryable) {
+                    handleQuery(query);
+                  }
+                  break;
+                case "rephrase":
+                  const input = document.querySelector(
+                    'input[type="text"]'
+                  ) as HTMLInputElement;
+                  if (input) {
+                    input.focus();
+                    input.select();
+                  }
+                  break;
+                case "simplify":
+                  const examples = [
+                    "Show me all data",
+                    "What columns are available?",
+                    "Show me the first 10 rows",
+                  ];
+                  const exampleQuery =
+                    examples[Math.floor(Math.random() * examples.length)];
+                  handleQuery(exampleQuery);
+                  break;
+              }
+            },
+          })
+        );
+
+        // Create enhanced error message
+        const errorMessage = createErrorMessage(
+          {
+            ...executionError,
+            recoveryActions,
+          },
+          query
+        );
+
+        setMessages((prev) => [...prev, errorMessage]);
+
+        setState((prev) => ({
+          ...prev,
+          error: apiError.message,
+          isLoading: false,
+        }));
+
+        addNotification("error", executionError.userFriendlyMessage);
+      }
     }
+  };
+
+  // Execute query automatically (combines translation and execution)
+  const executeQueryAutomatically = async (query: string) => {
+    return measureAsync(
+      "automaticExecution",
+      async () => {
+        const startTime = performance.now();
+        const pipelineStartTime = Date.now();
+
+        // Performance tracking for automatic execution pipeline
+        const performanceMetrics = {
+          translationTime: 0,
+          cacheCheckTime: 0,
+          executionTime: 0,
+          chartSelectionTime: 0,
+          uiUpdateTime: 0,
+          totalPipelineTime: 0,
+          fromCache: false,
+          rowCount: 0,
+          queryLength: query.length,
+        };
+
+        setState((prev) => ({
+          ...prev,
+          isExecutingQuery: true,
+        }));
+
+        try {
+          // Add initial execution status message
+          const executionStatusMessage: ExecutionStatusMessage = {
+            id: generateId(),
+            type: "system",
+            content: "Executing query and generating your dashboard...",
+            timestamp: new Date(),
+            status: "executing",
+          };
+          setMessages((prev) => [...prev, executionStatusMessage]);
+
+          // Use the API service's automatic execution method for comprehensive performance tracking
+          const automaticExecutionStart = performance.now();
+          const automaticResult = await apiService.executeQueryAutomatically(
+            query
+          );
+          const automaticExecutionTime =
+            performance.now() - automaticExecutionStart;
+
+          // Extract results from the automatic execution
+          const translationResponse = automaticResult.translationResult;
+          const executionResponse = automaticResult.executionResult;
+          const fromCache = automaticResult.fromCache;
+
+          // Update performance metrics with actual timing
+          performanceMetrics.translationTime = automaticExecutionTime * 0.3; // Estimate based on typical breakdown
+          performanceMetrics.executionTime = automaticExecutionTime * 0.6; // Estimate based on typical breakdown
+          performanceMetrics.cacheCheckTime = automaticExecutionTime * 0.1; // Estimate based on typical breakdown
+          performanceMetrics.fromCache = fromCache;
+
+          // Add assistant message showing the generated SQL with executing status
+          const sqlMessage: SQLMessage = {
+            id: generateId(),
+            type: "assistant",
+            content: `I've generated this SQL query and executed it:`,
+            timestamp: new Date(),
+            sqlQuery: translationResponse.sql,
+            executionStatus: "executing",
+          };
+          setMessages((prev) => [...prev, sqlMessage]);
+
+          setState((prev) => ({
+            ...prev,
+            currentSQL: translationResponse.sql,
+          }));
+
+          // Update row count from execution result
+          performanceMetrics.rowCount = executionResponse.row_count || 0;
+
+          // Process results and update dashboard with performance tracking
+          const chartSelectionStart = performance.now();
+          const chartConfig = selectChartType({
+            columns: executionResponse.columns,
+            rows: executionResponse.rows,
+          });
+          performanceMetrics.chartSelectionTime =
+            performance.now() - chartSelectionStart;
+
+          const uiUpdateStart = performance.now();
+          const totalPipelineTime = Date.now() - pipelineStartTime;
+          performanceMetrics.totalPipelineTime = totalPipelineTime;
+
+          // Show cache notification if applicable
+          if (fromCache) {
+            addNotification("info", "Using cached results");
+            performanceMonitor.startTimer("cache_hit_processing");
+          } else {
+            performanceMonitor.startTimer("cache_miss_processing");
+          }
+
+          // Add execution completion status message with enhanced performance info
+          const completionStatusMessage: ExecutionStatusMessage = {
+            id: generateId(),
+            type: "system",
+            content: `Query executed successfully! Found ${
+              executionResponse.row_count
+            } rows in ${executionResponse.runtime_ms}ms${
+              fromCache ? " (cached result)" : ""
+            }${
+              performanceMetrics.totalPipelineTime > 2000
+                ? ` • Total pipeline: ${(
+                    performanceMetrics.totalPipelineTime / 1000
+                  ).toFixed(1)}s`
+                : ""
+            }`,
+            timestamp: new Date(),
+            status: "completed",
+            details: {
+              executionTime: executionResponse.runtime_ms,
+              rowCount: executionResponse.row_count,
+              pipelineTime: performanceMetrics.totalPipelineTime,
+              fromCache,
+            },
+          };
+          setMessages((prev) => [...prev, completionStatusMessage]);
+
+          // Add success message with execution details
+          const successMessage: SQLMessage = {
+            id: generateId(),
+            type: "assistant",
+            content: `Perfect! I've executed your query and the results are displayed in the dashboard on the right. ${
+              fromCache
+                ? "This result was retrieved from cache for faster performance."
+                : `The query processed ${executionResponse.row_count} rows and completed in ${executionResponse.runtime_ms}ms.`
+            }${
+              performanceMetrics.totalPipelineTime > 3000
+                ? ` The complete pipeline took ${(
+                    performanceMetrics.totalPipelineTime / 1000
+                  ).toFixed(1)} seconds.`
+                : ""
+            }`,
+            timestamp: new Date(),
+            sqlQuery: translationResponse.sql,
+            executionStatus: "completed" as const,
+            executionTime: executionResponse.runtime_ms,
+            rowCount: executionResponse.row_count,
+          };
+          setMessages((prev) => [...prev, successMessage]);
+
+          setState((prev) => ({
+            ...prev,
+            queryResults: executionResponse,
+            currentChart: chartConfig,
+            isLoading: false,
+            isExecutingQuery: false,
+            lastExecutionTime: totalPipelineTime,
+          }));
+
+          performanceMetrics.uiUpdateTime = performance.now() - uiUpdateStart;
+
+          // Log comprehensive performance metrics
+          console.group("🚀 Automatic Execution Performance Metrics");
+          console.log(
+            `📊 Query: "${query.substring(0, 50)}${
+              query.length > 50 ? "..." : ""
+            }"`
+          );
+          console.log(
+            `⏱️  Translation: ${performanceMetrics.translationTime.toFixed(
+              2
+            )}ms`
+          );
+          console.log(
+            `🗄️  Cache check: ${performanceMetrics.cacheCheckTime.toFixed(2)}ms`
+          );
+          console.log(`💾 Cache ${fromCache ? "HIT" : "MISS"}`);
+          console.log(
+            `⚡ SQL execution: ${performanceMetrics.executionTime.toFixed(2)}ms`
+          );
+          console.log(
+            `📈 Chart selection: ${performanceMetrics.chartSelectionTime.toFixed(
+              2
+            )}ms`
+          );
+          console.log(
+            `🎨 UI update: ${performanceMetrics.uiUpdateTime.toFixed(2)}ms`
+          );
+          console.log(
+            `🏁 Total pipeline: ${performanceMetrics.totalPipelineTime}ms`
+          );
+          console.log(`📋 Rows processed: ${performanceMetrics.rowCount}`);
+          console.log(
+            `📝 Query length: ${performanceMetrics.queryLength} chars`
+          );
+
+          // Performance analysis and recommendations
+          if (performanceMetrics.totalPipelineTime > 5000) {
+            console.warn("⚠️  Slow automatic execution detected (>5s)");
+          }
+          if (performanceMetrics.translationTime > 2000) {
+            console.warn("⚠️  Slow translation detected (>2s)");
+          }
+          if (performanceMetrics.executionTime > 3000) {
+            console.warn("⚠️  Slow SQL execution detected (>3s)");
+          }
+          if (performanceMetrics.rowCount > 10000 && !fromCache) {
+            console.info("💡 Large dataset - consider caching or pagination");
+          }
+
+          console.groupEnd();
+
+          // Record performance metrics for monitoring
+          performanceMonitor.startTimer("automatic_execution_complete");
+          const endTimer = performanceMonitor.endTimer(
+            "automatic_execution_complete"
+          );
+
+          // End cache processing timer
+          if (fromCache) {
+            performanceMonitor.endTimer("cache_hit_processing");
+          } else {
+            performanceMonitor.endTimer("cache_miss_processing");
+          }
+
+          addNotification(
+            "success",
+            `Query executed successfully (${
+              executionResponse.row_count
+            } rows, ${executionResponse.runtime_ms}ms${
+              fromCache ? ", cached" : ""
+            })`
+          );
+
+          // Record execution performance for monitoring
+          recordExecution({
+            query,
+            executionTime: performanceMetrics.totalPipelineTime,
+            success: true,
+            fromCache,
+            rowCount: performanceMetrics.rowCount,
+          });
+
+          // Return performance metrics for potential use by calling code
+          return {
+            success: true,
+            metrics: performanceMetrics,
+            result: executionResponse,
+          };
+        } catch (error) {
+          const apiError = error as ApiError;
+          const errorTime = Date.now() - pipelineStartTime;
+
+          // Log error performance metrics
+          console.group("❌ Automatic Execution Error Metrics");
+          console.log(
+            `📊 Query: "${query.substring(0, 50)}${
+              query.length > 50 ? "..." : ""
+            }"`
+          );
+          console.log(`⏱️  Time to error: ${errorTime}ms`);
+          console.log(
+            `🔍 Translation time: ${performanceMetrics.translationTime.toFixed(
+              2
+            )}ms`
+          );
+          console.log(
+            `🗄️  Cache check time: ${performanceMetrics.cacheCheckTime.toFixed(
+              2
+            )}ms`
+          );
+          console.log(
+            `⚡ Execution time: ${performanceMetrics.executionTime.toFixed(
+              2
+            )}ms`
+          );
+          console.log(`❌ Error: ${apiError.message}`);
+          console.log(`🔄 Retryable: ${apiError.retryable ? "Yes" : "No"}`);
+          console.groupEnd();
+
+          // Record error metrics
+          performanceMonitor.startTimer("automatic_execution_error");
+          performanceMonitor.endTimer("automatic_execution_error");
+
+          // Determine error phase for better user messaging
+          const isTranslationError = !state.currentSQL;
+          const errorPhase = isTranslationError ? "translation" : "execution";
+
+          // Create enhanced error with user-friendly messaging and suggestions
+          const executionError = createUserFriendlyError(
+            apiError,
+            errorPhase,
+            query
+          );
+
+          // Create recovery actions with actual functionality
+          const recoveryActions = executionError.recoveryActions?.map(
+            (action) => ({
+              ...action,
+              action: () => {
+                switch (action.type) {
+                  case "retry":
+                    if (executionError.retryable) {
+                      handleQuery(query);
+                    }
+                    break;
+                  case "rephrase":
+                    // Focus on input to encourage rephrasing
+                    const input = document.querySelector(
+                      'input[type="text"]'
+                    ) as HTMLInputElement;
+                    if (input) {
+                      input.focus();
+                      input.select();
+                    }
+                    break;
+                  case "simplify":
+                    // Provide example simple questions
+                    const examples = [
+                      "Show me all data",
+                      "What columns are available?",
+                      "Show me the first 10 rows",
+                    ];
+                    const exampleQuery =
+                      examples[Math.floor(Math.random() * examples.length)];
+                    handleQuery(exampleQuery);
+                    break;
+                  case "contact_support":
+                    // Could open a support modal or redirect
+                    console.log("Contact support action triggered");
+                    break;
+                }
+              },
+            })
+          );
+
+          // Add execution failure status message with performance context
+          const failureStatusMessage: ExecutionStatusMessage = {
+            id: generateId(),
+            type: "system",
+            content: `Query execution failed: ${
+              executionError.userFriendlyMessage
+            }${
+              errorTime > 5000
+                ? ` (failed after ${(errorTime / 1000).toFixed(1)}s)`
+                : ""
+            }`,
+            timestamp: new Date(),
+            status: "failed",
+            details: {
+              error: executionError.userFriendlyMessage,
+              errorTime,
+              phase: errorPhase,
+            },
+          };
+          setMessages((prev) => [...prev, failureStatusMessage]);
+
+          // Create enhanced error message for conversation
+          const errorMessage = createErrorMessage(
+            {
+              ...executionError,
+              recoveryActions,
+            },
+            query
+          );
+
+          setMessages((prev) => [...prev, errorMessage]);
+
+          setState((prev) => ({
+            ...prev,
+            error: apiError.message,
+            isLoading: false,
+            isExecutingQuery: false,
+          }));
+
+          // Enhanced notification with user-friendly message
+          addNotification("error", executionError.userFriendlyMessage);
+
+          // Auto-retry logic for retryable errors
+          if (shouldAutoRetry(apiError, 0)) {
+            const retryDelay = calculateRetryDelay(0);
+
+            // Show retry notification
+            addNotification(
+              "info",
+              `Retrying automatically in ${Math.round(
+                retryDelay / 1000
+              )} seconds...`
+            );
+
+            setTimeout(() => {
+              console.log("Auto-retrying query due to retryable error");
+              handleQuery(query);
+            }, retryDelay);
+          }
+
+          // Record error execution performance for monitoring
+          recordExecution({
+            query,
+            executionTime: errorTime,
+            success: false,
+            fromCache: false,
+            rowCount: 0,
+            errorPhase,
+          });
+
+          // Return error metrics for potential use by calling code
+          return {
+            success: false,
+            metrics: {
+              ...performanceMetrics,
+              totalPipelineTime: errorTime,
+              error: apiError.message,
+              errorPhase,
+            },
+            error: apiError,
+          };
+        }
+      },
+      {
+        queryLength: query.length,
+        executionMode: "automatic",
+      }
+    );
   };
 
   // Handle SQL execution
@@ -499,13 +1020,47 @@ function App() {
     } catch (error) {
       const apiError = error as ApiError;
 
-      // Add error message
-      const errorMessage: Message = {
-        id: generateId(),
-        type: "assistant",
-        content: `There was an error executing the query: ${apiError.message}`,
-        timestamp: new Date(),
-      };
+      // Create enhanced error for execution phase
+      const executionError = createUserFriendlyError(
+        apiError,
+        "execution",
+        state.currentQuery
+      );
+
+      // Create recovery actions for SQL execution
+      const recoveryActions = executionError.recoveryActions?.map((action) => ({
+        ...action,
+        action: () => {
+          switch (action.type) {
+            case "retry":
+              if (executionError.retryable) {
+                handleSQLExecution(sql);
+              }
+              break;
+            case "rephrase":
+              // Close modal and focus on input for rephrasing
+              setState((prev) => ({ ...prev, showSQLModal: false }));
+              const input = document.querySelector(
+                'input[type="text"]'
+              ) as HTMLInputElement;
+              if (input) {
+                input.focus();
+                input.select();
+              }
+              break;
+          }
+        },
+      }));
+
+      // Create enhanced error message
+      const errorMessage = createErrorMessage(
+        {
+          ...executionError,
+          recoveryActions,
+        },
+        state.currentQuery
+      );
+
       setMessages((prev) => [...prev, errorMessage]);
 
       setState((prev) => ({
@@ -513,7 +1068,8 @@ function App() {
         error: apiError.message,
         isLoading: false,
       }));
-      addNotification("error", `Query execution failed: ${apiError.message}`);
+
+      addNotification("error", executionError.userFriendlyMessage);
     }
   };
 
@@ -606,6 +1162,21 @@ function App() {
     }));
     setMessages([]);
     setCurrentDashboardId(undefined);
+  };
+
+  // Handle execution mode change
+  const handleExecutionModeChange = (mode: "automatic" | "advanced") => {
+    setState((prev) => ({
+      ...prev,
+      executionMode: mode,
+    }));
+
+    // Persist the preference
+    userPreferences.updateUI({
+      executionMode: mode,
+    });
+
+    addNotification("info", `Switched to ${mode} execution mode`);
   };
 
   // Determine current phase based on application state
@@ -743,6 +1314,8 @@ function App() {
                     messages={messages}
                     onSendMessage={handleQuery}
                     isLoading={state.isLoading}
+                    executionMode={state.executionMode}
+                    onExecutionModeChange={handleExecutionModeChange}
                   />
                 ) : (
                   <DashboardWorkspace
@@ -751,6 +1324,7 @@ function App() {
                     currentChart={state.currentChart}
                     currentQuery={state.currentQuery}
                     onSaveDashboard={handleSaveDashboard}
+                    onNewQuery={handleNewDashboard}
                     isLoading={state.isLoading}
                     currentView={
                       mobileView === "dashboard" ? "dashboard" : "data"
@@ -772,6 +1346,8 @@ function App() {
                   messages={messages}
                   onSendMessage={handleQuery}
                   isLoading={state.isLoading}
+                  executionMode={state.executionMode}
+                  onExecutionModeChange={handleExecutionModeChange}
                 />
               }
               dashboardContent={
@@ -782,6 +1358,7 @@ function App() {
                     currentChart={state.currentChart}
                     currentQuery={state.currentQuery}
                     onSaveDashboard={handleSaveDashboard}
+                    onNewQuery={handleNewDashboard}
                     isLoading={state.isLoading}
                     currentView={layoutState.currentView}
                     onViewChange={handleViewChange}
@@ -793,8 +1370,8 @@ function App() {
         </AutoHideSidebar>
       </ErrorBoundary>
 
-      {/* SQL Preview Modal */}
-      {state.showSQLModal && (
+      {/* SQL Preview Modal - Only show in advanced mode */}
+      {state.showSQLModal && state.executionMode === "advanced" && (
         <ErrorBoundary level="component" onError={handleGlobalError}>
           <Suspense
             fallback={
@@ -832,6 +1409,37 @@ function App() {
       />
     </div>
   );
+}
+
+// Global performance monitoring utilities for development and debugging
+if (typeof window !== "undefined") {
+  // Add performance monitoring to window for debugging
+  (window as any).dashlyPerformance = {
+    logExecutionSummary: () => {
+      console.log("Use the performance summary in the app component");
+    },
+    logCachePerformance: () => {
+      sessionCache.logCachePerformance();
+    },
+    clearPerformanceHistory: () => {
+      performanceMonitor.clearMetrics();
+      sessionCache.clearAllCache();
+      console.log("🧹 All performance data cleared");
+    },
+    getPerformanceMetrics: () => {
+      return {
+        general: performanceMonitor.getMetrics(),
+        cache: sessionCache.getCachePerformanceMetrics(),
+        cacheStats: sessionCache.getCacheStats(),
+      };
+    },
+  };
+
+  // Log available performance commands
+  console.log("🔧 Performance monitoring available:");
+  console.log("  window.dashlyPerformance.logCachePerformance()");
+  console.log("  window.dashlyPerformance.clearPerformanceHistory()");
+  console.log("  window.dashlyPerformance.getPerformanceMetrics()");
 }
 
 export default App;

@@ -1,325 +1,234 @@
-import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
 import ErrorRecovery from "../ErrorRecovery";
-import { ApiError } from "../../types/api";
+import { ErrorMessage } from "../../types/ui";
 
 describe("ErrorRecovery", () => {
-  const mockOnRetry = vi.fn();
-  const mockOnDismiss = vi.fn();
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  const networkError: ApiError = {
-    message: "Network connection failed",
-    code: "NETWORK_ERROR",
+  const mockErrorMessage: ErrorMessage = {
+    id: "test-error",
+    type: "assistant",
+    content: "Test error occurred",
+    timestamp: new Date(),
+    isError: true,
+    errorPhase: "translation",
+    userFriendlyMessage: "I couldn't understand your question",
+    suggestions: [
+      "Try rephrasing your question",
+      "Use simpler language",
+      "Ask about one thing at a time",
+    ],
     retryable: true,
-    timestamp: "2023-01-01T00:00:00Z",
-    requestId: "req_123",
+    recoveryActions: [
+      {
+        type: "retry",
+        label: "Try Again",
+        description: "Retry the same query",
+      },
+      {
+        type: "rephrase",
+        label: "Rephrase Question",
+        description: "Ask your question in a different way",
+      },
+    ],
+    errorCode: "TRANSLATION_FAILED",
   };
 
-  const validationError: ApiError = {
-    message: "Invalid file format",
-    code: "VALIDATION_ERROR",
-    retryable: false,
-    timestamp: "2023-01-01T00:00:00Z",
-    requestId: "req_456",
-  };
+  it("should render error message with user-friendly text", () => {
+    render(<ErrorRecovery error={mockErrorMessage} />);
 
-  it("should render error information correctly", () => {
-    render(
-      <ErrorRecovery
-        error={networkError}
-        onRetry={mockOnRetry}
-        onDismiss={mockOnDismiss}
-      />
-    );
-
-    expect(screen.getByText("Connection Problem")).toBeInTheDocument();
-    expect(screen.getByText("Network connection failed")).toBeInTheDocument();
     expect(
-      screen.getByText("Check your internet connection and try again.")
+      screen.getByText("Couldn't understand your question")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("I couldn't understand your question")
+    ).toBeInTheDocument();
+    expect(screen.getByText("TRANSLATION_FAILED")).toBeInTheDocument();
+  });
+
+  it("should render suggestions", () => {
+    render(<ErrorRecovery error={mockErrorMessage} />);
+
+    expect(screen.getByText("Try this:")).toBeInTheDocument();
+    expect(
+      screen.getByText("Try rephrasing your question")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Use simpler language")).toBeInTheDocument();
+    expect(
+      screen.getByText("Ask about one thing at a time")
     ).toBeInTheDocument();
   });
 
-  it("should show retry button for retryable errors", () => {
-    render(
-      <ErrorRecovery
-        error={networkError}
-        onRetry={mockOnRetry}
-        currentRetryCount={1}
-        maxRetries={3}
-      />
-    );
+  it("should render recovery actions as buttons", () => {
+    render(<ErrorRecovery error={mockErrorMessage} />);
 
-    const retryButton = screen.getByRole("button", {
-      name: /try again.*2 left/i,
-    });
-    expect(retryButton).toBeInTheDocument();
-    expect(retryButton).not.toBeDisabled();
-  });
-
-  it("should not show retry button for non-retryable errors", () => {
-    render(
-      <ErrorRecovery
-        error={validationError}
-        onRetry={mockOnRetry}
-        onDismiss={mockOnDismiss}
-      />
-    );
-
+    expect(screen.getByText("What would you like to do?")).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /try again/i })
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "Try Again" })
+    ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /dismiss/i })
+      screen.getByRole("button", { name: "Rephrase Question" })
     ).toBeInTheDocument();
   });
 
-  it("should disable retry button when max retries reached", () => {
+  it("should call recovery action when button is clicked", () => {
+    const mockAction = vi.fn();
+    const errorWithAction: ErrorMessage = {
+      ...mockErrorMessage,
+      recoveryActions: [
+        {
+          type: "retry",
+          label: "Try Again",
+          description: "Retry the same query",
+          action: mockAction,
+        },
+      ],
+    };
+
+    render(<ErrorRecovery error={errorWithAction} />);
+
+    const retryButton = screen.getByRole("button", { name: "Try Again" });
+    fireEvent.click(retryButton);
+
+    expect(mockAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("should call prop handlers when no action is provided", () => {
+    const onRetry = vi.fn();
+    const onRephrase = vi.fn();
+
+    const errorWithoutActions: ErrorMessage = {
+      ...mockErrorMessage,
+      recoveryActions: [
+        {
+          type: "retry",
+          label: "Try Again",
+          description: "Retry the same query",
+        },
+        {
+          type: "rephrase",
+          label: "Rephrase Question",
+          description: "Ask your question in a different way",
+        },
+      ],
+    };
+
     render(
       <ErrorRecovery
-        error={networkError}
-        onRetry={mockOnRetry}
-        currentRetryCount={3}
-        maxRetries={3}
+        error={errorWithoutActions}
+        onRetry={onRetry}
+        onRephrase={onRephrase}
       />
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Try Again" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Rephrase Question" }));
+    expect(onRephrase).toHaveBeenCalledTimes(1);
+  });
+
+  it("should show retry hint for retryable errors", () => {
+    render(<ErrorRecovery error={mockErrorMessage} />);
+
     expect(
-      screen.queryByRole("button", { name: /try again/i })
+      screen.getByText(/This error might be temporary/)
+    ).toBeInTheDocument();
+  });
+
+  it("should not show retry hint for non-retryable errors", () => {
+    const nonRetryableError: ErrorMessage = {
+      ...mockErrorMessage,
+      retryable: false,
+    };
+
+    render(<ErrorRecovery error={nonRetryableError} />);
+
+    expect(
+      screen.queryByText(/This error might be temporary/)
     ).not.toBeInTheDocument();
   });
 
-  it("should call onRetry when retry button is clicked", async () => {
-    mockOnRetry.mockResolvedValue(undefined);
+  it("should show technical details in collapsible section", () => {
+    const errorWithDetails: ErrorMessage = {
+      ...mockErrorMessage,
+      originalError: "Detailed technical error message",
+    };
 
-    render(
-      <ErrorRecovery
-        error={networkError}
-        onRetry={mockOnRetry}
-        currentRetryCount={0}
-        maxRetries={3}
-      />
-    );
+    render(<ErrorRecovery error={errorWithDetails} />);
 
-    const retryButton = screen.getByRole("button", {
-      name: /try again.*3 left/i,
-    });
-    fireEvent.click(retryButton);
+    expect(screen.getByText("Technical details")).toBeInTheDocument();
 
-    expect(mockOnRetry).toHaveBeenCalledTimes(1);
-  });
-
-  it("should show loading state during retry", async () => {
-    let resolveRetry: () => void;
-    const retryPromise = new Promise<void>((resolve) => {
-      resolveRetry = resolve;
-    });
-    mockOnRetry.mockReturnValue(retryPromise);
-
-    render(
-      <ErrorRecovery
-        error={networkError}
-        onRetry={mockOnRetry}
-        currentRetryCount={0}
-        maxRetries={3}
-      />
-    );
-
-    const retryButton = screen.getByRole("button", {
-      name: /try again.*3 left/i,
-    });
-    fireEvent.click(retryButton);
-
-    // Should show loading state
-    expect(screen.getByText("Retrying...")).toBeInTheDocument();
-    expect(retryButton).toBeDisabled();
-
-    // Resolve the retry
-    resolveRetry!();
-    await waitFor(() => {
-      expect(screen.queryByText("Retrying...")).not.toBeInTheDocument();
-    });
-  });
-
-  it("should call onDismiss when dismiss button is clicked", () => {
-    render(
-      <ErrorRecovery
-        error={validationError}
-        onRetry={mockOnRetry}
-        onDismiss={mockOnDismiss}
-      />
-    );
-
-    const dismissButton = screen.getByRole("button", { name: /dismiss/i });
-    fireEvent.click(dismissButton);
-
-    expect(mockOnDismiss).toHaveBeenCalledTimes(1);
-  });
-
-  it("should show technical details when enabled and toggled", () => {
-    render(
-      <ErrorRecovery
-        error={networkError}
-        onRetry={mockOnRetry}
-        showTechnicalDetails={true}
-      />
-    );
-
-    // Initially details should be hidden
-    expect(screen.queryByText("Error Code:")).not.toBeInTheDocument();
-
-    // Click show details button
-    const showDetailsButton = screen.getByRole("button", {
-      name: /show details/i,
-    });
-    fireEvent.click(showDetailsButton);
-
-    // Details should now be visible
-    expect(screen.getByText("Error Code:")).toBeInTheDocument();
-    expect(screen.getByText("NETWORK_ERROR")).toBeInTheDocument();
-    expect(screen.getByText("req_123")).toBeInTheDocument();
-    expect(screen.getByText("Yes")).toBeInTheDocument(); // Retryable: Yes
-
-    // Click hide details button
-    const hideDetailsButton = screen.getByRole("button", {
-      name: /hide details/i,
-    });
-    fireEvent.click(hideDetailsButton);
-
-    // Details should be hidden again
-    expect(screen.queryByText("Error Code:")).not.toBeInTheDocument();
-  });
-
-  it("should not show technical details button when disabled", () => {
-    render(
-      <ErrorRecovery
-        error={networkError}
-        onRetry={mockOnRetry}
-        showTechnicalDetails={false}
-      />
-    );
-
+    // Click to expand details
+    fireEvent.click(screen.getByText("Technical details"));
     expect(
-      screen.queryByRole("button", { name: /show details/i })
-    ).not.toBeInTheDocument();
+      screen.getByText("Detailed technical error message")
+    ).toBeInTheDocument();
   });
 
-  it("should display appropriate error titles for different error types", () => {
-    const testCases = [
-      {
-        error: { ...networkError, code: "NETWORK_ERROR" },
-        expectedTitle: "Connection Problem",
-      },
-      {
-        error: { ...networkError, code: "TIMEOUT_ERROR" },
-        expectedTitle: "Request Timeout",
-      },
-      {
-        error: { ...networkError, code: "VALIDATION_ERROR" },
-        expectedTitle: "Invalid Input",
-      },
-      {
-        error: { ...networkError, code: "FILE_TOO_LARGE" },
-        expectedTitle: "File Too Large",
-      },
-      {
-        error: { ...networkError, code: "INVALID_FILE_TYPE" },
-        expectedTitle: "Invalid File Type",
-      },
-      {
-        error: { ...networkError, code: "SERVICE_UNAVAILABLE" },
-        expectedTitle: "Service Unavailable",
-      },
-      {
-        error: { ...networkError, code: "RATE_LIMIT_ERROR" },
-        expectedTitle: "Too Many Requests",
-      },
-      {
-        error: { ...networkError, code: "UNKNOWN_ERROR", retryable: true },
-        expectedTitle: "Temporary Error",
-      },
-      {
-        error: { ...networkError, code: "UNKNOWN_ERROR", retryable: false },
-        expectedTitle: "Error",
-      },
-    ];
+  it("should render different icons and titles for different error phases", () => {
+    const executionError: ErrorMessage = {
+      ...mockErrorMessage,
+      errorPhase: "execution",
+    };
 
-    testCases.forEach(({ error, expectedTitle }) => {
-      const { unmount } = render(
-        <ErrorRecovery error={error as ApiError} onRetry={mockOnRetry} />
-      );
+    render(<ErrorRecovery error={executionError} />);
+    expect(screen.getByText("Query execution failed")).toBeInTheDocument();
 
-      expect(screen.getByText(expectedTitle)).toBeInTheDocument();
-      unmount();
+    const networkError: ErrorMessage = {
+      ...mockErrorMessage,
+      errorPhase: "network",
+    };
+
+    render(<ErrorRecovery error={networkError} />);
+    expect(screen.getByText("Connection problem")).toBeInTheDocument();
+  });
+
+  it("should limit suggestions to 3 items", () => {
+    const errorWithManySuggestions: ErrorMessage = {
+      ...mockErrorMessage,
+      suggestions: [
+        "Suggestion 1",
+        "Suggestion 2",
+        "Suggestion 3",
+        "Suggestion 4",
+        "Suggestion 5",
+      ],
+    };
+
+    render(<ErrorRecovery error={errorWithManySuggestions} />);
+
+    expect(screen.getByText("Suggestion 1")).toBeInTheDocument();
+    expect(screen.getByText("Suggestion 2")).toBeInTheDocument();
+    expect(screen.getByText("Suggestion 3")).toBeInTheDocument();
+    expect(screen.queryByText("Suggestion 4")).not.toBeInTheDocument();
+    expect(screen.queryByText("Suggestion 5")).not.toBeInTheDocument();
+  });
+
+  it("should handle contact support action", () => {
+    // Mock window.open
+    const mockOpen = vi.fn();
+    Object.defineProperty(window, "open", {
+      value: mockOpen,
+      writable: true,
     });
-  });
 
-  it("should display appropriate suggestions for different error types", () => {
-    const testCases = [
-      {
-        error: { ...networkError, code: "NETWORK_ERROR" },
-        expectedSuggestion: "Check your internet connection and try again.",
-      },
-      {
-        error: { ...networkError, code: "TIMEOUT_ERROR" },
-        expectedSuggestion:
-          "The request took too long. Try again or check your connection.",
-      },
-      {
-        error: { ...networkError, code: "FILE_TOO_LARGE" },
-        expectedSuggestion: "Please select a smaller file (under 10MB).",
-      },
-      {
-        error: { ...networkError, code: "INVALID_FILE_TYPE" },
-        expectedSuggestion: "Please select a valid CSV file.",
-      },
-      {
-        error: { ...networkError, code: "RATE_LIMIT_ERROR" },
-        expectedSuggestion: "Please wait a moment before trying again.",
-      },
-    ];
+    const errorWithSupport: ErrorMessage = {
+      ...mockErrorMessage,
+      recoveryActions: [
+        {
+          type: "contact_support",
+          label: "Get Help",
+          description: "Contact support for assistance",
+        },
+      ],
+    };
 
-    testCases.forEach(({ error, expectedSuggestion }) => {
-      const { unmount } = render(
-        <ErrorRecovery error={error as ApiError} onRetry={mockOnRetry} />
-      );
+    render(<ErrorRecovery error={errorWithSupport} />);
 
-      expect(screen.getByText(expectedSuggestion)).toBeInTheDocument();
-      unmount();
-    });
-  });
-
-  it("should handle retry failures gracefully", async () => {
-    const retryError = new Error("Retry failed");
-    mockOnRetry.mockRejectedValue(retryError);
-
-    // Mock console.error to avoid noise in test output
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    render(
-      <ErrorRecovery
-        error={networkError}
-        onRetry={mockOnRetry}
-        currentRetryCount={0}
-        maxRetries={3}
-      />
+    fireEvent.click(screen.getByRole("button", { name: "Get Help" }));
+    expect(mockOpen).toHaveBeenCalledWith(
+      "mailto:support@dashly.com?subject=Error Report",
+      "_blank"
     );
-
-    const retryButton = screen.getByRole("button", {
-      name: /try again.*3 left/i,
-    });
-    fireEvent.click(retryButton);
-
-    // Wait for retry to complete
-    await waitFor(() => {
-      expect(screen.queryByText("Retrying...")).not.toBeInTheDocument();
-    });
-
-    expect(consoleSpy).toHaveBeenCalledWith("Retry failed:", retryError);
-    consoleSpy.mockRestore();
   });
 });

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
-import { LAYOUT_CONFIG, CSS_VARIABLES, Z_INDEX } from "../config/layout";
+import { LAYOUT_CONFIG, Z_INDEX } from "../config/layout";
 import { useBreakpoint } from "../hooks/useMediaQuery";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { LayoutState } from "../types/layout";
@@ -574,7 +574,7 @@ const EnhancedResizableLayout: React.FC<ResizableLayoutProps> = (props) => {
   }
 
   const performanceMonitor = usePerformanceMonitor("ResizableLayout");
-  const { viewport, constraints } = analyzeViewportConstraints();
+  const { constraints } = analyzeViewportConstraints();
 
   // Apply graceful degradation based on constraints
   const fallbackProps = createFallbackProps("ResizableLayout");

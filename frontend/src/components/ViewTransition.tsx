@@ -153,7 +153,7 @@ const ViewTransition: React.FC<ViewTransitionProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full overflow-hidden ${className}`}
+      className={`relative w-full h-full ${className}`}
       style={{
         minHeight: "200px", // Prevent layout shift during transitions
       }}
@@ -172,13 +172,6 @@ const ViewTransition: React.FC<ViewTransitionProps> = ({
 
       {/* Enhanced loading overlay */}
       {renderLoadingOverlay()}
-
-      {/* Context preservation indicator */}
-      {isTransitioning && previousView && (
-        <div className="absolute top-2 right-2 text-xs text-gray-500 bg-white px-2 py-1 rounded shadow-sm z-20">
-          Switching to {currentView === "dashboard" ? "Dashboard" : "Data"} view
-        </div>
-      )}
     </div>
   );
 };

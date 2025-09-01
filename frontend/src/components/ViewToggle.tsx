@@ -12,44 +12,35 @@ export interface ViewToggleProps {
 const ViewToggle: React.FC<ViewToggleProps> = ({
   currentView,
   onViewChange,
-  hasCharts,
   disabled = false,
   className = "",
 }) => {
   const handleToggle = useCallback(() => {
     if (disabled) return;
 
-    // Toggle between data and dashboard views
-    if (currentView === "data" && hasCharts) {
+    // Toggle between data and dashboard views - no restrictions based on hasCharts
+    if (currentView === "data") {
       onViewChange("dashboard");
     } else if (currentView === "dashboard") {
       onViewChange("data");
     }
-  }, [currentView, hasCharts, disabled, onViewChange]);
+  }, [currentView, disabled, onViewChange]);
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
-      <span className="text-sm text-gray-600">Data</span>
+      <span className="text-sm text-gray-600">Table</span>
       <button
         onClick={handleToggle}
-        disabled={disabled || !hasCharts}
+        disabled={disabled}
         className={`
           relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 ease-in-out
           focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2
-          ${
-            disabled || !hasCharts
-              ? "opacity-50 cursor-not-allowed"
-              : "cursor-pointer"
-          }
-          ${
-            currentView === "dashboard" && hasCharts
-              ? "bg-red-600"
-              : "bg-gray-300"
-          }
+          ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
+          ${currentView === "dashboard" ? "bg-red-600" : "bg-gray-300"}
         `}
         aria-label={`Switch to ${
-          currentView === "data" ? "dashboard" : "data"
-        } view${!hasCharts ? " (no charts available)" : ""}`}
+          currentView === "data" ? "dashboard" : "table"
+        } view`}
       >
         <span
           className={`

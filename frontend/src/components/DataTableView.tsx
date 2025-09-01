@@ -44,9 +44,9 @@ const DataTableView: React.FC<DataTableViewProps> = memo(
   ({
     tableInfo,
     data = [],
-    maxRows = 100,
+    maxRows = 200,
     className = "",
-    virtualScrolling = true,
+    virtualScrolling = false,
     isLoading = false,
     onLoadMore,
     enableSearch = true,
@@ -369,74 +369,95 @@ const DataTableView: React.FC<DataTableViewProps> = memo(
         {/* Table Content */}
         <div
           ref={containerRef}
-          className="overflow-auto"
-          style={{ height: displayingVirtualScroll ? "400px" : "auto" }}
+          className="overflow-auto border border-gray-200 rounded-md"
+          style={{ height: "calc(100vh - 280px)", minHeight: "500px" }}
           onScroll={handleScroll}
         >
           {displayingVirtualScroll ? (
             // Virtual scrolling container
-            <div style={{ height: totalHeight, position: "relative" }}>
-              <div
-                style={{
-                  transform: `translateY(${startIndex * ROW_HEIGHT}px)`,
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                }}
-              >
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50 sticky top-0 z-10">
-                    <tr>
-                      {columns.map((column, index) => (
-                        <th
-                          key={column.name}
-                          scope="col"
-                          className={`px-3 sm:px-6 py-3 text-left ${
-                            enableSort ? "cursor-pointer hover:bg-gray-100" : ""
-                          }`}
-                          onClick={() => handleSort(index)}
-                        >
-                          <div className="flex flex-col">
-                            <div className="flex items-center">
-                              <span className="text-xs font-medium text-gray-900 uppercase tracking-wider">
-                                {column.name}
-                              </span>
-                              {renderSortIcon(index)}
-                            </div>
-                            <span className="text-xs text-gray-500 font-normal mt-1">
-                              {column.type}
+            <div
+              style={{
+                height: totalHeight,
+                position: "relative",
+                minHeight: "100%",
+              }}
+            >
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50 sticky top-0 z-10">
+                  <tr>
+                    {columns.map((column, index) => (
+                      <th
+                        key={column.name}
+                        scope="col"
+                        className={`px-3 sm:px-6 py-3 text-left ${
+                          enableSort ? "cursor-pointer hover:bg-gray-100" : ""
+                        }`}
+                        onClick={() => handleSort(index)}
+                      >
+                        <div className="flex flex-col">
+                          <div className="flex items-center">
+                            <span className="text-xs font-medium text-gray-900 uppercase tracking-wider">
+                              {column.name}
                             </span>
+                            {renderSortIcon(index)}
                           </div>
-                        </th>
+                          <span className="text-xs text-gray-500 font-normal mt-1">
+                            {column.type}
+                          </span>
+                        </div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody
+                  className="bg-white divide-y divide-gray-200"
+                  style={{
+                    transform: `translateY(${startIndex * ROW_HEIGHT}px)`,
+                  }}
+                >
+                  {/* Spacer for virtual scrolling */}
+                  {startIndex > 0 && (
+                    <tr style={{ height: startIndex * ROW_HEIGHT }}>
+                      <td colSpan={columns.length}></td>
+                    </tr>
+                  )}
+                  {visibleRows.map((row, rowIndex) => (
+                    <tr
+                      key={startIndex + rowIndex}
+                      className="hover:bg-gray-50"
+                      style={{ height: ROW_HEIGHT }}
+                    >
+                      {row.map((cell, cellIndex) => (
+                        <td
+                          key={cellIndex}
+                          className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900"
+                        >
+                          <div
+                            className="max-w-xs truncate"
+                            title={cell?.toString() || ""}
+                          >
+                            {cell?.toString() || ""}
+                          </div>
+                        </td>
                       ))}
                     </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {visibleRows.map((row, rowIndex) => (
-                      <tr
-                        key={startIndex + rowIndex}
-                        className="hover:bg-gray-50"
-                        style={{ height: ROW_HEIGHT }}
-                      >
-                        {row.map((cell, cellIndex) => (
-                          <td
-                            key={cellIndex}
-                            className="px-3 sm:px-6 py-3 sm:py-4 whitespace-nowrap text-xs sm:text-sm text-gray-900"
-                          >
-                            <div
-                              className="max-w-xs truncate"
-                              title={cell?.toString() || ""}
-                            >
-                              {cell?.toString() || ""}
-                            </div>
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                  {/* Bottom spacer for virtual scrolling */}
+                  {startIndex + visibleRows.length < sortedData.length && (
+                    <tr
+                      style={{
+                        height:
+                          (sortedData.length -
+                            startIndex -
+                            visibleRows.length) *
+                          ROW_HEIGHT,
+                      }}
+                    >
+                      <td colSpan={columns.length}></td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           ) : (
             // Regular table for smaller datasets
@@ -445,7 +466,7 @@ const DataTableView: React.FC<DataTableViewProps> = memo(
               role="table"
               aria-label={`Data table for ${tableInfo.table}`}
             >
-              <thead className="bg-gray-50">
+              <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
                   {columns.map((column, index) => (
                     <th

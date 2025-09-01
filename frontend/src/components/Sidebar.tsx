@@ -117,6 +117,7 @@ export default function Sidebar({
                 onClick={() => onLoadDashboard(dashboard)}
                 onMouseEnter={() => setHoveredItem(dashboard.id)}
                 onMouseLeave={() => setHoveredItem(null)}
+                data-testid={`dashboard-card-${dashboard.id}`}
                 className={`w-full text-left px-3 py-2 transition-colors duration-200 ${
                   currentDashboardId === dashboard.id
                     ? "bg-gray-800 text-white"

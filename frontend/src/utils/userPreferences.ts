@@ -22,6 +22,7 @@ export interface UIPreferences {
   compactMode: boolean;
   showTooltips: boolean;
   autoSave: boolean;
+  executionMode: "automatic" | "advanced";
 }
 
 export interface UserPreferences {
@@ -56,6 +57,7 @@ const getDefaultUserPreferences = (): UserPreferences => ({
     compactMode: false,
     showTooltips: true,
     autoSave: true,
+    executionMode: "automatic",
   },
   version: CURRENT_PREFERENCES_VERSION,
 });
@@ -146,6 +148,11 @@ const validateUserPreferences = (
     compactMode: preferences.ui?.compactMode ?? defaults.ui.compactMode,
     showTooltips: preferences.ui?.showTooltips ?? defaults.ui.showTooltips,
     autoSave: preferences.ui?.autoSave ?? defaults.ui.autoSave,
+    executionMode: ["automatic", "advanced"].includes(
+      preferences.ui?.executionMode || ""
+    )
+      ? (preferences.ui!.executionMode as "automatic" | "advanced")
+      : defaults.ui.executionMode,
   };
 
   return {
