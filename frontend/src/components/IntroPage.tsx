@@ -91,11 +91,14 @@ export default function IntroPage({
                 </label>
 
                 <button
-                  onClick={onDemoData}
+                  onClick={() => {
+                    console.log("Demo button clicked in IntroPage");
+                    onDemoData();
+                  }}
                   disabled={isLoading}
                   className="btn-secondary"
                 >
-                  Use Demo Data
+                  {isLoading ? "Loading..." : "Use Demo Data"}
                 </button>
               </div>
             </div>

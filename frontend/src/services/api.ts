@@ -1,6 +1,6 @@
 // API Service Layer with Axios configuration and error handling
 
-import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from "axios";
+import axios, { AxiosInstance, AxiosError } from "axios";
 import {
   UploadResponse,
   TranslateResponse,
@@ -295,134 +295,182 @@ class ApiService {
     ); // Fewer retries for uploads
   }
 
-  // Use demo data with retry logic
+  // Use demo data with comprehensive debugging
   async useDemoData(): Promise<UploadResponse> {
-    return this.retryRequest(async () => {
-      const formData = new FormData();
-      formData.append("use_demo", "true");
+    console.log("API: useDemoData called");
 
-      const response = await this.client.post<UploadResponse>(
-        "/upload",
-        formData,
-        {
-          headers: {
-            "Content-Type": "multipart/form-data",
-          },
-        }
+    const requestUrl = "/api/demo";
+    const fullUrl = `${window.location.origin}${requestUrl}`;
+
+    console.log("API: Request details:");
+    console.log("  - URL:", requestUrl);
+    console.log("  - Full URL:", fullUrl);
+    console.log("  - Method: POST");
+    console.log("  - Headers: Content-Type: application/json");
+
+    try {
+      console.log("API: Starting fetch request...");
+
+      const response = await fetch(requestUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        // Add explicit timeout
+        signal: AbortSignal.timeout(15000),
+      });
+
+      console.log("API: Fetch completed!");
+      console.log("API: Response status:", response.status);
+      console.log("API: Response statusText:", response.statusText);
+      console.log(
+        "API: Response headers:",
+        Object.fromEntries(response.headers.entries())
       );
 
-      return response.data;
-    });
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("API: Response not ok:", response.status, errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      console.log("API: Parsing JSON response...");
+      const data = await response.json();
+      console.log("API: JSON parsed successfully:", data);
+
+      return data;
+    } catch (error) {
+      console.error("API: useDemoData error:", error);
+
+      if (error instanceof Error) {
+        if (error.name === "TimeoutError") {
+          throw {
+            message: "Request timed out after 15 seconds",
+            code: "TIMEOUT_ERROR",
+          } as ApiError;
+        }
+
+        throw {
+          message: error.message,
+          code: "REQUEST_ERROR",
+        } as ApiError;
+      }
+
+      throw error;
+    }
   }
 
   // Translate natural language to SQL with retry logic
-  translateQuery = measurePerformance("api_translateQuery", async (query: string): Promise<TranslateResponse> => {
-    if (!query.trim()) {
-      throw {
-        message: "Please enter a question about your data.",
-        code: "EMPTY_QUERY",
-      } as ApiError;
+  translateQuery = measurePerformance(
+    "api_translateQuery",
+    async (query: string): Promise<TranslateResponse> => {
+      if (!query.trim()) {
+        throw {
+          message: "Please enter a question about your data.",
+          code: "EMPTY_QUERY",
+        } as ApiError;
+      }
+
+      return this.retryRequest(async () => {
+        const response = await this.client.post<any>(
+          "/query",
+          {
+            query: query.trim(),
+          },
+          {
+            timeout: 45000, // Longer timeout for LLM processing
+          }
+        );
+
+        // The /api/query endpoint returns a different format, so we need to adapt it
+        return {
+          sql: response.data.sql,
+        };
+      });
     }
-
-    return this.retryRequest(async () => {
-      const response = await this.client.post<any>(
-        "/query",
-        {
-          query: query.trim(),
-        },
-        {
-          timeout: 45000, // Longer timeout for LLM processing
-        }
-      );
-
-      // The /api/query endpoint returns a different format, so we need to adapt it
-      return {
-        sql: response.data.sql,
-      };
-    });
-  });
+  );
 
   // Execute SQL query with retry logic and caching
-  executeSQL = measurePerformance("api_executeSQL", async (sql: string, question?: string): Promise<ExecuteResponse> => {
-    if (!sql.trim()) {
-      throw {
-        message: "SQL query cannot be empty.",
-        code: "EMPTY_SQL",
-      } as ApiError;
-    }
-
-    // Check cache first if we have a question context
-    if (question) {
-      const cached = sessionCache.getCachedQueryResult(sql, question);
-      if (cached) {
-        console.log("Using cached query result");
-        return cached;
+  executeSQL = measurePerformance(
+    "api_executeSQL",
+    async (sql: string, question?: string): Promise<ExecuteResponse> => {
+      if (!sql.trim()) {
+        throw {
+          message: "SQL query cannot be empty.",
+          code: "EMPTY_SQL",
+        } as ApiError;
       }
-    }
 
-    return this.retryRequest(async () => {
-      const response = await this.client.post<ExecuteResponse>(
-        "/execute",
-        {
-          sql: sql.trim(),
-        },
-        {
-          timeout: 60000, // Longer timeout for complex queries
-        }
-      );
-
-      // Cache the result if we have question context
+      // Check cache first if we have a question context
       if (question) {
-        sessionCache.cacheQueryResult(sql, question, response.data);
+        const cached = sessionCache.getCachedQueryResult(sql, question);
+        if (cached) {
+          console.log("Using cached query result");
+          return cached;
+        }
       }
 
-      return response.data;
-    });
-  });
-  }
+      return this.retryRequest(async () => {
+        const response = await this.client.post<ExecuteResponse>(
+          "/execute",
+          {
+            sql: sql.trim(),
+          },
+          {
+            timeout: 60000, // Longer timeout for complex queries
+          }
+        );
+
+        // Cache the result if we have question context
+        if (question) {
+          sessionCache.cacheQueryResult(sql, question, response.data);
+        }
+
+        return response.data;
+      });
+    }
+  );
 
   // Save dashboard configuration with retry logic
-  async saveDashboard(
-    dashboard: Omit<Dashboard, "id" | "createdAt">
-  ): Promise<Dashboard> {
-    if (!dashboard.name.trim()) {
-      throw {
-        message: "Dashboard name cannot be empty.",
-        code: "EMPTY_NAME",
-      } as ApiError;
+  saveDashboard = measurePerformance(
+    "api_saveDashboard",
+    async (
+      dashboard: Omit<Dashboard, "id" | "createdAt">
+    ): Promise<Dashboard> => {
+      if (!dashboard.name.trim()) {
+        throw {
+          message: "Dashboard name cannot be empty.",
+          code: "EMPTY_NAME",
+        } as ApiError;
+      }
+
+      return this.retryRequest(async () => {
+        const response = await this.client.post<Dashboard>(
+          "/dashboards",
+          dashboard
+        );
+
+        // Clear dashboard cache since we have new data
+        sessionCache.clearDashboardCache();
+
+        return response.data;
+      });
     }
+  );
 
-    return this.retryRequest(async () => {
-      const response = await this.client.post<Dashboard>(
-        "/dashboards",
-        dashboard
-      );
+  // Get saved dashboards with retry logic and caching - TEMPORARILY SIMPLIFIED
+  getDashboards = async (): Promise<Dashboard[]> => {
+    console.log("getDashboards called (caching temporarily disabled)");
 
-      // Clear dashboard cache since we have new data
-      sessionCache.clearDashboardCache();
-
-      return response.data;
-    });
-  }
-
-  // Get saved dashboards with retry logic and caching
-  async getDashboards(): Promise<Dashboard[]> {
-    // Check cache first
-    const cached = sessionCache.getCachedDashboards();
-    if (cached) {
-      console.log("Using cached dashboards");
-      return cached;
-    }
-
-    return this.retryRequest(async () => {
+    try {
       const response = await this.client.get<Dashboard[]>("/dashboards");
-
-      // Cache the result
-      sessionCache.cacheDashboards(response.data);
-
+      console.log("getDashboards response:", response.data);
       return response.data;
-    });
-  }
+    } catch (error) {
+      console.error("getDashboards error:", error);
+      return []; // Return empty array on error
+    }
+  };
 
   // Get dashboard by ID with retry logic
   async getDashboard(id: string): Promise<Dashboard> {

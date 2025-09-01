@@ -5,6 +5,27 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* Layout CSS Custom Properties for Dynamic Sizing */
+    --chat-pane-width: 16.67%;
+    --dashboard-pane-width: 83.33%;
+    --sidebar-width: 240px;
+    --sidebar-trigger-width: 20px;
+    --animation-duration: 200ms;
+    
+    /* Breakpoint values for JavaScript access */
+    --breakpoint-mobile: 768px;
+    --breakpoint-tablet: 1024px;
+    --breakpoint-desktop: 1200px;
+    
+    /* Z-index values */
+    --z-sidebar: 1000;
+    --z-sidebar-overlay: 999;
+    --z-resize-handle: 100;
+    --z-modal: 2000;
+    --z-toast: 3000;
+  }
+
   body {
     margin: 0;
     font-family: 'Quicksand', system-ui, sans-serif;

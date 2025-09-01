@@ -64,20 +64,21 @@ function App() {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
   }, []);
 
-  // Load saved dashboards on app initialization
+  // Load saved dashboards on app initialization - TEMPORARILY DISABLED
   useEffect(() => {
-    const loadDashboards = async () => {
-      try {
-        const dashboards = await apiService.getDashboards();
-        setState((prev) => ({ ...prev, savedDashboards: dashboards }));
-      } catch (error) {
-        console.error("Failed to load dashboards:", error);
-        // Don't show error toast for initial load failure, but log it
-        handleGlobalError(error as ApiError);
-      }
-    };
+    console.log("Dashboard loading temporarily disabled for debugging");
+    // const loadDashboards = async () => {
+    //   try {
+    //     const dashboards = await apiService.getDashboards();
+    //     setState((prev) => ({ ...prev, savedDashboards: dashboards }));
+    //   } catch (error) {
+    //     console.error("Failed to load dashboards:", error);
+    //     // Don't show error toast for initial load failure, but log it
+    //     handleGlobalError(error as ApiError);
+    //   }
+    // };
 
-    loadDashboards();
+    // loadDashboards();
   }, [handleGlobalError]);
 
   // Handle file upload
@@ -115,6 +116,7 @@ function App() {
 
   // Handle demo data selection
   const handleDemoData = async () => {
+    console.log("Demo data button clicked");
     setState((prev) => ({
       ...prev,
       uploadStatus: "uploading",
@@ -123,26 +125,44 @@ function App() {
     }));
 
     try {
+      console.log("App: Calling apiService.useDemoData()");
+
       const response = await apiService.useDemoData();
+
+      console.log("App: Received response:", response);
+      console.log("App: Response type:", typeof response);
+      console.log("App: Response keys:", Object.keys(response || {}));
+
       setState((prev) => ({
         ...prev,
         uploadStatus: "completed",
         tableInfo: response,
         isLoading: false,
       }));
+
+      console.log("App: State updated successfully");
       addNotification("success", "Demo data loaded successfully");
 
       // Preload query phase components since user will likely query next
       import("./components/QueryPhase");
     } catch (error) {
-      const apiError = error as ApiError;
+      console.error("App: Demo data error:", error);
+      console.error("App: Error type:", typeof error);
+      console.error("App: Error details:", JSON.stringify(error, null, 2));
+
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : (error as ApiError)?.message || "Unknown error occurred";
+
       setState((prev) => ({
         ...prev,
         uploadStatus: "error",
-        error: apiError.message,
+        error: errorMessage,
         isLoading: false,
       }));
-      addNotification("error", `Failed to load demo data: ${apiError.message}`);
+
+      addNotification("error", `Failed to load demo data: ${errorMessage}`);
     }
   };
 
