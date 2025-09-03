@@ -183,3 +183,20 @@ class Dashboard(BaseModel):
     sql: str
     chartConfig: ChartConfig
     createdAt: str
+
+
+# Chat Service Models
+class ChatRequest(BaseModel):
+    """Request model for chat interactions."""
+    message: str
+    conversation_id: Optional[str] = None
+
+
+class ConversationalResponse(BaseModel):
+    """Response model for conversational chat interactions."""
+    message: str
+    chart_config: Optional[ChartConfig] = None
+    insights: List[str] = []
+    follow_up_questions: List[str] = []
+    processing_time_ms: float
+    conversation_id: str

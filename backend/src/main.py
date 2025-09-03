@@ -29,13 +29,16 @@ try:
         SQLErrorResponse,
         Dashboard,
         DashboardRequest,
-        ChartConfig
+        ChartConfig,
+        ChatRequest,
+        ConversationalResponse
     )
     
     # Import the components
     from .file_upload_handler import FileUploadHandler
     from .database_manager import DatabaseManager
     from .schema_service import SchemaService
+    from .chat_service import ChatService
     from .auth import verify_api_key, SecurityHeadersMiddleware
     from .rate_limiter import RateLimitMiddleware, api_rate_limiter
     
@@ -79,13 +82,16 @@ except ImportError:
         SQLErrorResponse,
         Dashboard,
         DashboardRequest,
-        ChartConfig
+        ChartConfig,
+        ChatRequest,
+        ConversationalResponse
     )
     
     # Import the components
     from file_upload_handler import FileUploadHandler
     from database_manager import DatabaseManager
     from schema_service import SchemaService
+    from chat_service import ChatService
     from auth import verify_api_key, SecurityHeadersMiddleware
     from rate_limiter import RateLimitMiddleware, api_rate_limiter
     
@@ -460,6 +466,9 @@ query_executor = QueryExecutor(
 performance_monitor = get_performance_monitor(slow_query_threshold_ms=sql_config.slow_query_threshold_ms)
 query_explain_service = QueryExplainService(db_connection, sql_validator)
 
+# Initialize chat service
+chat_service = ChatService(query_executor=query_executor)
+
 class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000, description="Natural language query")
     sql_query: Optional[str] = Field(None, description="Direct SQL query (will be validated)")
@@ -742,6 +751,45 @@ async def process_query(request: QueryRequest, authenticated: bool = Depends(ver
         raise HTTPException(
             status_code=400,
             detail="Query execution failed. Please check your SQL syntax."
+        )
+
+@app.post("/api/chat", response_model=ConversationalResponse)
+@handle_api_exception
+async def process_chat_message(
+    request: ChatRequest, 
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Process natural language chat message and return conversational response.
+    
+    This endpoint provides a beginner-friendly chat interface that hides
+    technical complexity and returns conversational responses with insights
+    and follow-up question suggestions.
+    
+    Args:
+        request: ChatRequest containing the user's natural language message
+        authenticated: Authentication verification dependency
+        
+    Returns:
+        ConversationalResponse: Conversational response with insights and suggestions
+        
+    Raises:
+        HTTPException: Various HTTP status codes based on error type
+    """
+    logger.info(f"Processing chat message: '{request.message[:50]}...'")
+    
+    try:
+        # Process the chat message using ChatService
+        response = await chat_service.process_chat_message(request)
+        
+        logger.info(f"Chat message processed successfully in {response.processing_time_ms:.2f}ms")
+        return response
+        
+    except Exception as e:
+        logger.error(f"Chat processing failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="I'm having trouble processing your message right now. Please try again."
         )
 
 @app.get("/api/schema", response_model=Dict[str, Any])

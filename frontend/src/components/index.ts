@@ -21,6 +21,7 @@ export * from "./SkeletonLoader";
 // New ChatGPT-style layout components
 export { default as Sidebar } from "./Sidebar";
 export { default as ConversationPane } from "./ConversationPane";
+export { default as ConversationInterface } from "./ConversationInterface";
 export { default as IntroPage } from "./IntroPage";
 export { default as DashboardWorkspace } from "./DashboardWorkspace";
 export { default as ResizableLayout } from "./ResizableLayout";
