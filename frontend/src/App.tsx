@@ -3,7 +3,7 @@ import { ToastContainer, LoadingSpinner, ErrorBoundary } from "./components";
 import { Message } from "./types";
 import ResizableLayout from "./components/ResizableLayout";
 import AutoHideSidebar from "./components/AutoHideSidebar";
-import ConversationPane from "./components/ConversationPane";
+import ConversationInterface from "./components/ConversationInterface";
 import Sidebar from "./components/Sidebar";
 import IntroPage from "./components/IntroPage";
 import DashboardWorkspace from "./components/DashboardWorkspace";
@@ -18,6 +18,7 @@ import {
   ExecuteResponse,
   SQLMessage,
   ExecutionStatusMessage,
+  ErrorMessage,
 } from "./types";
 import { LayoutState, ViewType } from "./types/layout";
 import { apiService } from "./services/api";
@@ -31,6 +32,8 @@ import {
   shouldAutoRetry,
   calculateRetryDelay,
 } from "./utils/errorHandling";
+import { ChatMessage } from "./components/MessageRenderer";
+import { ChartConfig as ChartConfigChart } from "./types/chart";
 import { useErrorHandler } from "./hooks/useErrorHandler";
 import { useSessionCache } from "./hooks/useSessionCache";
 import { useBreakpoint } from "./hooks/useMediaQuery";
@@ -70,6 +73,104 @@ const getInitialLayoutState = (breakpoint: string): LayoutState => ({
   currentBreakpoint: breakpoint as any,
   isResizing: false,
 });
+
+// Message adapter to convert between old Message types and new ChatMessage types
+const convertMessageToChatMessage = (
+  message: Message,
+  currentChart?: ChartConfigChart,
+  queryResults?: ExecuteResponse
+): ChatMessage => {
+  // Handle different message types
+  if (message.type === "system") {
+    // System messages are converted to assistant messages with special styling
+    return {
+      id: message.id,
+      type: "assistant",
+      content: message.content,
+      timestamp: message.timestamp,
+      metadata: {
+        insights: [], // System messages don't have insights
+        followUpQuestions: [], // System messages don't have follow-ups
+      },
+    };
+  }
+
+  // Handle SQL messages with execution details
+  if ("sqlQuery" in message) {
+    const sqlMessage = message as SQLMessage;
+    const insights: string[] = [];
+
+    if (sqlMessage.executionTime && sqlMessage.rowCount !== undefined) {
+      insights.push(`Query executed in ${sqlMessage.executionTime}ms`);
+      insights.push(`Found ${sqlMessage.rowCount.toLocaleString()} rows`);
+    }
+
+    // Add chart information if available
+    const chartData = queryResults
+      ? {
+          columns: queryResults.columns,
+          rows: queryResults.rows,
+        }
+      : undefined;
+
+    // Generate basic follow-up questions based on the data
+    const followUpQuestions: string[] = [];
+    if (queryResults && queryResults.columns.length > 0) {
+      followUpQuestions.push("Show me a different view of this data");
+      followUpQuestions.push("What are the key trends in this data?");
+      if (
+        queryResults.columns.some(
+          (col) =>
+            col.toLowerCase().includes("date") ||
+            col.toLowerCase().includes("time")
+        )
+      ) {
+        followUpQuestions.push("Show me this data over time");
+      }
+    }
+
+    return {
+      id: message.id,
+      type: message.type as "user" | "assistant",
+      content: message.content,
+      timestamp: message.timestamp,
+      metadata: {
+        insights,
+        followUpQuestions: followUpQuestions.slice(0, 3), // Limit to 3 questions
+        chartConfig: currentChart,
+        chartData,
+        dashboardUpdated: !!currentChart, // Flag if dashboard was updated
+      },
+    };
+  }
+
+  // Handle error messages
+  if ("isError" in message) {
+    const errorMessage = message as ErrorMessage;
+    return {
+      id: message.id,
+      type: message.type as "user" | "assistant",
+      content: message.content,
+      timestamp: message.timestamp,
+      metadata: {
+        insights: errorMessage.suggestions || [],
+        followUpQuestions: [],
+      },
+    };
+  }
+
+  // Handle regular messages
+  return {
+    id: message.id,
+    type: message.type as "user" | "assistant",
+    content: message.content,
+    timestamp: message.timestamp,
+    metadata: {
+      insights: [],
+      followUpQuestions: [],
+    },
+  };
+};
 
 function App() {
   const [state, setState] = useState<AppState>(initialState);
@@ -669,8 +770,6 @@ function App() {
             details: {
               executionTime: executionResponse.runtime_ms,
               rowCount: executionResponse.row_count,
-              pipelineTime: performanceMetrics.totalPipelineTime,
-              fromCache,
             },
           };
           setMessages((prev) => [...prev, completionStatusMessage]);
@@ -899,8 +998,6 @@ function App() {
             status: "failed",
             details: {
               error: executionError.userFriendlyMessage,
-              errorTime,
-              phase: errorPhase,
             },
           };
           setMessages((prev) => [...prev, failureStatusMessage]);
@@ -1310,12 +1407,17 @@ function App() {
                 className="flex-1 overflow-hidden"
               >
                 {mobileView === "chat" ? (
-                  <ConversationPane
-                    messages={messages}
+                  <ConversationInterface
+                    messages={messages.map((msg) =>
+                      convertMessageToChatMessage(
+                        msg,
+                        state.currentChart,
+                        state.queryResults
+                      )
+                    )}
                     onSendMessage={handleQuery}
-                    isLoading={state.isLoading}
-                    executionMode={state.executionMode}
-                    onExecutionModeChange={handleExecutionModeChange}
+                    isProcessing={state.isLoading}
+                    placeholder="Ask me anything about your data..."
                   />
                 ) : (
                   <DashboardWorkspace
@@ -1342,12 +1444,17 @@ function App() {
               minChatWidth={LAYOUT_CONFIG.constraints.minChatWidth}
               maxChatWidth={LAYOUT_CONFIG.constraints.maxChatWidth}
               chatContent={
-                <ConversationPane
-                  messages={messages}
+                <ConversationInterface
+                  messages={messages.map((msg) =>
+                    convertMessageToChatMessage(
+                      msg,
+                      state.currentChart,
+                      state.queryResults
+                    )
+                  )}
                   onSendMessage={handleQuery}
-                  isLoading={state.isLoading}
-                  executionMode={state.executionMode}
-                  onExecutionModeChange={handleExecutionModeChange}
+                  isProcessing={state.isLoading}
+                  placeholder="Ask me anything about your data..."
                 />
               }
               dashboardContent={
@@ -1419,18 +1526,18 @@ if (typeof window !== "undefined") {
       console.log("Use the performance summary in the app component");
     },
     logCachePerformance: () => {
-      sessionCache.logCachePerformance();
+      // Cache performance logging would be handled by the hook internally
     },
     clearPerformanceHistory: () => {
       performanceMonitor.clearMetrics();
-      sessionCache.clearAllCache();
+      // Cache clearing would be handled by the hook internally
       console.log("🧹 All performance data cleared");
     },
     getPerformanceMetrics: () => {
       return {
         general: performanceMonitor.getMetrics(),
-        cache: sessionCache.getCachePerformanceMetrics(),
-        cacheStats: sessionCache.getCacheStats(),
+        cache: {}, // Cache metrics would be available through the hook
+        cacheStats: {}, // Cache stats would be available through the hook
       };
     },
   };

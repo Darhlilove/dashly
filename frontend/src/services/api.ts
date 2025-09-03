@@ -8,6 +8,11 @@ import {
   ApiError,
   AutomaticExecutionResult,
   ExecutionError,
+  ChatRequest,
+  ConversationalResponse,
+  ConversationHistory,
+  ConversationContext,
+  ConversationSummary,
 } from "../types/api";
 import { Dashboard } from "../types/dashboard";
 import { sessionCache } from "../utils/cache";
@@ -765,6 +770,136 @@ class ApiService {
 
     return this.retryRequest(async () => {
       const response = await this.client.get<Dashboard>(`/dashboards/${id}`);
+      return response.data;
+    });
+  }
+
+  // Chat API Methods
+  async sendChatMessage(request: ChatRequest): Promise<ConversationalResponse> {
+    if (!request.message.trim()) {
+      throw {
+        message: "Please enter a message.",
+        code: "EMPTY_MESSAGE",
+        retryable: false,
+      } as ApiError;
+    }
+
+    return this.retryRequest(
+      async () => {
+        const response = await this.client.post<ConversationalResponse>(
+          "/chat",
+          {
+            message: request.message.trim(),
+            conversation_id: request.conversation_id,
+          },
+          {
+            timeout: 30000, // 30 second timeout for chat processing
+          }
+        );
+
+        return response.data;
+      },
+      {
+        retries: 2, // Fewer retries for chat to avoid long waits
+        retryCondition: (error: AxiosError) => {
+          // Only retry on network errors or 5xx server errors
+          // Don't retry on 4xx errors (user input issues)
+          return (
+            !error.response ||
+            (error.response.status >= 500 && error.response.status < 600)
+          );
+        },
+      }
+    );
+  }
+
+  // Conversation History Management Methods
+  async getConversationHistory(
+    conversationId: string
+  ): Promise<ConversationHistory> {
+    if (!conversationId.trim()) {
+      throw {
+        message: "Conversation ID cannot be empty.",
+        code: "EMPTY_CONVERSATION_ID",
+        retryable: false,
+      } as ApiError;
+    }
+
+    return this.retryRequest(async () => {
+      const response = await this.client.get<ConversationHistory>(
+        `/conversations/${conversationId}/history`
+      );
+      return response.data;
+    });
+  }
+
+  async getConversationContext(
+    conversationId: string
+  ): Promise<ConversationContext> {
+    if (!conversationId.trim()) {
+      throw {
+        message: "Conversation ID cannot be empty.",
+        code: "EMPTY_CONVERSATION_ID",
+        retryable: false,
+      } as ApiError;
+    }
+
+    return this.retryRequest(async () => {
+      const response = await this.client.get<ConversationContext>(
+        `/conversations/${conversationId}/context`
+      );
+      return response.data;
+    });
+  }
+
+  async getConversationSummary(
+    conversationId: string
+  ): Promise<ConversationSummary> {
+    if (!conversationId.trim()) {
+      throw {
+        message: "Conversation ID cannot be empty.",
+        code: "EMPTY_CONVERSATION_ID",
+        retryable: false,
+      } as ApiError;
+    }
+
+    return this.retryRequest(async () => {
+      const response = await this.client.get<ConversationSummary>(
+        `/conversations/${conversationId}/summary`
+      );
+      return response.data;
+    });
+  }
+
+  async clearConversation(
+    conversationId: string
+  ): Promise<{ message: string; conversation_id: string }> {
+    if (!conversationId.trim()) {
+      throw {
+        message: "Conversation ID cannot be empty.",
+        code: "EMPTY_CONVERSATION_ID",
+        retryable: false,
+      } as ApiError;
+    }
+
+    return this.retryRequest(async () => {
+      const response = await this.client.delete<{
+        message: string;
+        conversation_id: string;
+      }>(`/conversations/${conversationId}`);
+      return response.data;
+    });
+  }
+
+  async cleanupExpiredConversations(): Promise<{
+    message: string;
+    count: number;
+  }> {
+    return this.retryRequest(async () => {
+      const response = await this.client.post<{
+        message: string;
+        count: number;
+      }>(`/conversations/cleanup`);
       return response.data;
     });
   }

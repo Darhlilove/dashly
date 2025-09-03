@@ -649,6 +649,59 @@
     color: #000;
   }
 
+  /* Chat interface accessibility enhancements */
+  .chat-message-user {
+    background-color: #2563eb;
+    color: white;
+  }
+
+  .chat-message-assistant {
+    background-color: white;
+    color: #111827;
+    border: 1px solid #e5e7eb;
+  }
+
+  .high-contrast .chat-message-user {
+    background-color: #000;
+    border: 2px solid #000;
+  }
+
+  .high-contrast .chat-message-assistant {
+    background-color: #fff;
+    color: #000;
+    border: 2px solid #000;
+  }
+
+  /* Mobile-specific chat improvements */
+  @media (max-width: 640px) {
+    .chat-input-mobile {
+      font-size: 16px; /* Prevents zoom on iOS */
+    }
+
+    .chat-message-mobile {
+      max-width: 90%;
+      font-size: 14px;
+    }
+
+    .chat-button-mobile {
+      min-height: 44px; /* iOS touch target minimum */
+      min-width: 44px;
+    }
+  }
+
+  /* Focus management for chat interface */
+  .chat-focus-visible:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2);
+  }
+
+  .high-contrast .chat-focus-visible:focus-visible {
+    outline: 3px solid #000;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 6px rgba(0, 0, 0, 0.3);
+  }
+
   /* Screen reader optimizations */
   .screen-reader-optimized .sr-only {
     /* Enhanced screen reader content - inherits base sr-only styles */

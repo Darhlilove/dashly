@@ -12,9 +12,11 @@ from dataclasses import dataclass
 try:
     from .logging_config import get_logger
     from .exceptions import ValidationError, ConfigurationError
+    from .response_cache import get_response_cache
 except ImportError:
     from logging_config import get_logger
     from exceptions import ValidationError, ConfigurationError
+    from response_cache import get_response_cache
 
 logger = get_logger(__name__)
 
@@ -46,7 +48,11 @@ class LLMService:
                 "X-Title": "Dashly - Dashboard Auto-Designer"  # Optional: for OpenRouter analytics
             }
         )
-        logger.info(f"LLM service initialized with model: {self.config.model}")
+        
+        # Performance optimization: response caching (Requirements 6.1)
+        self.response_cache = get_response_cache()
+        
+        logger.info(f"LLM service initialized with model: {self.config.model} and response caching")
     
     def _load_config(self) -> LLMConfig:
         """Load LLM configuration from environment variables."""
@@ -92,6 +98,13 @@ class LLMService:
         try:
             logger.info(f"Translating question to SQL: {question[:100]}...")
             
+            # Check cache first for performance optimization (Requirements 6.1)
+            cache_key = f"sql_translation:{question}:{schema_context[:100]}"
+            cached_sql = self.response_cache.get_llm_response(cache_key, self.config.model)
+            if cached_sql:
+                logger.info("Cache hit for SQL translation")
+                return cached_sql
+            
             # Make API call to OpenRouter
             response = await self.client.post(
                 f"{self.config.base_url}/chat/completions",
@@ -121,6 +134,14 @@ class LLMService:
             
             # Clean up the SQL query
             sql_query = self._clean_sql_query(sql_query)
+            
+            # Cache the result for future use (Requirements 6.1)
+            self.response_cache.cache_llm_response(
+                cache_key, 
+                sql_query, 
+                self.config.model,
+                ttl=600  # 10 minutes TTL for SQL translations
+            )
             
             logger.info(f"Generated SQL: {sql_query}")
             return sql_query
@@ -237,6 +258,13 @@ SQL Query:"""
             
             logger.info("Generating conversational explanation for query results")
             
+            # Check cache first (Requirements 6.1)
+            cache_key = f"explanation:{original_question}:{str(query_results)[:200]}"
+            cached_explanation = self.response_cache.get_llm_response(cache_key, self.config.model)
+            if cached_explanation:
+                logger.info("Cache hit for conversational explanation")
+                return cached_explanation
+            
             response = await self.client.post(
                 f"{self.config.base_url}/chat/completions",
                 json={
@@ -269,6 +297,15 @@ Your responses should:
             result = response.json()
             
             explanation = result["choices"][0]["message"]["content"].strip()
+            
+            # Cache the result (Requirements 6.1)
+            self.response_cache.cache_llm_response(
+                cache_key,
+                explanation,
+                self.config.model,
+                ttl=300  # 5 minutes TTL for explanations
+            )
+            
             logger.info("Generated conversational explanation successfully")
             return explanation
             

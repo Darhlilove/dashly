@@ -1,12 +1,55 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import ConversationInterface, { ChatMessage } from "../ConversationInterface";
+import ConversationInterface from "../ConversationInterface";
+import { ChatMessage } from "../MessageRenderer";
 
 // Mock scrollIntoView for JSDOM
 Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
   value: vi.fn(),
   writable: true,
 });
+
+// Mock MessageRenderer component
+vi.mock("../MessageRenderer", () => ({
+  default: ({ message, onFollowUpClick }: any) => (
+    <div data-testid={`message-${message.type}`}>
+      <div
+        className={
+          message.type === "user"
+            ? "bg-blue-600 text-white"
+            : "bg-gray-100 text-gray-900"
+        }
+      >
+        <div>{message.content}</div>
+        <div>
+          {message.timestamp.toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          })}
+        </div>
+        {message.metadata?.insights && (
+          <div>
+            <div>Key Insights:</div>
+            {message.metadata.insights.map((insight: string, i: number) => (
+              <div key={i}>{insight}</div>
+            ))}
+          </div>
+        )}
+        {message.metadata?.followUpQuestions && (
+          <div>
+            <div>You might also ask:</div>
+            {message.metadata.followUpQuestions.map((q: string, i: number) => (
+              <button key={i} onClick={() => onFollowUpClick?.(q)}>
+                "{q}"
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  ),
+}));
 
 describe("ConversationInterface", () => {
   const mockOnSendMessage = vi.fn();

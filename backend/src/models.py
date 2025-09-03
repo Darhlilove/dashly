@@ -17,6 +17,7 @@ class UploadResponse(BaseModel):
     """Response model for CSV upload endpoint."""
     table: str
     columns: List[ColumnInfo]
+    suggested_questions: Optional[List[str]] = None
 
 
 class TableSchema(BaseModel):

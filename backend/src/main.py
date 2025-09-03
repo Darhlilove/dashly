@@ -4,6 +4,9 @@ from pydantic import BaseModel, Field, validator
 import duckdb
 import os
 import threading
+import time
+import uuid
+import json
 from queue import Queue, Empty
 from contextlib import contextmanager
 from typing import Dict, Any, List, Optional
@@ -466,8 +469,39 @@ query_executor = QueryExecutor(
 performance_monitor = get_performance_monitor(slow_query_threshold_ms=sql_config.slow_query_threshold_ms)
 query_explain_service = QueryExplainService(db_connection, sql_validator)
 
-# Initialize chat service
-chat_service = ChatService(query_executor=query_executor)
+# Initialize chart recommendation service
+try:
+    from .chart_recommendation_service import ChartRecommendationService
+except ImportError:
+    from chart_recommendation_service import ChartRecommendationService
+
+chart_recommendation_service = ChartRecommendationService()
+
+# Initialize conversation history manager
+try:
+    from .conversation_history_manager import ConversationHistoryManager
+except ImportError:
+    from conversation_history_manager import ConversationHistoryManager
+
+conversation_history_manager = ConversationHistoryManager()
+
+# Initialize chat service with chart recommendation and conversation history
+chat_service = ChatService(
+    query_executor=query_executor,
+    chart_recommendation_service=chart_recommendation_service,
+    conversation_history_manager=conversation_history_manager
+)
+
+# Initialize performance optimization components
+try:
+    from .response_cache import get_response_cache
+    from .streaming_response import get_streaming_manager
+except ImportError:
+    from response_cache import get_response_cache
+    from streaming_response import get_streaming_manager
+
+response_cache = get_response_cache()
+streaming_manager = get_streaming_manager()
 
 class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000, description="Natural language query")
@@ -604,11 +638,24 @@ async def upload_csv(
         logger.error(f"DatabaseManager error: {type(e).__name__}: {str(e)}")
         raise
     
+    # Generate initial question suggestions for the uploaded data
+    try:
+        initial_suggestions = chat_service.generate_initial_data_questions(table_metadata.table_name)
+        logger.info(f"Generated {len(initial_suggestions)} initial question suggestions")
+    except Exception as e:
+        logger.warning(f"Failed to generate initial suggestions: {str(e)}")
+        initial_suggestions = [
+            "What does my data look like overall?",
+            "How much data do I have to work with?",
+            "What are the main patterns in my data?"
+        ]
+    
     # Return successful response
     logger.info(f"Upload completed successfully: {table_metadata.table_name}")
     return UploadResponse(
         table=table_metadata.table_name,
-        columns=table_metadata.columns
+        columns=table_metadata.columns,
+        suggested_questions=initial_suggestions[:5]  # Limit to 5 suggestions
     )
 
 @app.post("/api/demo", response_model=UploadResponse)
@@ -688,11 +735,24 @@ async def use_demo_data(
         logger.error(f"DatabaseManager error: {type(e).__name__}: {str(e)}")
         raise
     
+    # Generate initial question suggestions for the demo data
+    try:
+        initial_suggestions = chat_service.generate_initial_data_questions(table_metadata.table_name)
+        logger.info(f"Generated {len(initial_suggestions)} initial question suggestions for demo data")
+    except Exception as e:
+        logger.warning(f"Failed to generate initial suggestions for demo data: {str(e)}")
+        initial_suggestions = [
+            "What does this demo data show?",
+            "What patterns can I find in this sample data?",
+            "How can I explore this dataset?"
+        ]
+    
     # Return successful response
     logger.info(f"Demo data loaded successfully: {table_metadata.table_name}")
     return UploadResponse(
         table=table_metadata.table_name,
-        columns=table_metadata.columns
+        columns=table_metadata.columns,
+        suggested_questions=initial_suggestions[:5]  # Limit to 5 suggestions
     )
 
 @app.post("/api/query", response_model=QueryResponse)
@@ -776,10 +836,11 @@ async def process_chat_message(
     Raises:
         HTTPException: Various HTTP status codes based on error type
     """
+    start_time = time.time()
     logger.info(f"Processing chat message: '{request.message[:50]}...'")
     
     try:
-        # Process the chat message using ChatService
+        # Process the chat message using ChatService with performance optimizations
         response = await chat_service.process_chat_message(request)
         
         logger.info(f"Chat message processed successfully in {response.processing_time_ms:.2f}ms")
@@ -787,10 +848,282 @@ async def process_chat_message(
         
     except Exception as e:
         logger.error(f"Chat processing failed: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="I'm having trouble processing your message right now. Please try again."
+        
+        # Return a beginner-friendly error response instead of raising HTTPException
+        # This ensures the chat interface always gets a conversational response
+        return ConversationalResponse(
+            message="I'm having trouble processing your message right now. Please try again or rephrase your question.",
+            chart_config=None,
+            insights=["There was a technical issue processing your request."],
+            follow_up_questions=[
+                "Try asking your question differently",
+                "What would you like to know about your data?",
+                "Should we try a simpler question first?"
+            ],
+            processing_time_ms=(time.time() - start_time) * 1000,
+            conversation_id=request.conversation_id or str(uuid.uuid4())
         )
+
+@app.post("/api/chat/stream")
+@handle_api_exception
+async def chat_stream_endpoint(
+    request: ChatRequest,
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Process chat message with streaming updates for better perceived performance.
+    
+    Args:
+        request: ChatRequest containing the user's message
+        authenticated: Authentication verification dependency
+        
+    Returns:
+        Streaming response with real-time updates
+    """
+    from fastapi.responses import StreamingResponse
+    import uuid
+    
+    stream_id = str(uuid.uuid4())
+    logger.info(f"Starting streaming chat for: '{request.message[:50]}...' (stream: {stream_id})")
+    
+    async def generate_stream():
+        try:
+            # Process with streaming updates
+            response = await chat_service.process_chat_message_with_streaming(request, stream_id)
+            
+            # Stream the events
+            async for event in streaming_manager.create_stream(stream_id):
+                yield f"data: {event}\n\n"
+                
+        except Exception as e:
+            logger.error(f"Streaming chat failed: {e}")
+            error_event = {
+                "event": "error",
+                "data": {"error": str(e)},
+                "timestamp": time.time()
+            }
+            yield f"data: {json.dumps(error_event)}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+@app.get("/api/performance/stats")
+@handle_api_exception
+async def get_performance_stats(authenticated: bool = Depends(verify_api_key)):
+    """
+    Get comprehensive performance statistics for monitoring.
+    
+    Returns:
+        Performance statistics including cache hit rates, query times, etc.
+    """
+    try:
+        # Get cache statistics
+        cache_stats = response_cache.get_cache_stats()
+        
+        # Get query executor statistics
+        query_stats = query_executor.get_resource_status()
+        
+        # Get performance monitor statistics
+        perf_stats = performance_monitor.get_performance_stats()
+        
+        return {
+            "cache_performance": cache_stats,
+            "query_performance": query_stats,
+            "execution_metrics": {
+                "total_queries": perf_stats.metrics.total_queries,
+                "successful_queries": perf_stats.metrics.successful_queries,
+                "failed_queries": perf_stats.metrics.failed_queries,
+                "average_runtime_ms": perf_stats.metrics.average_runtime_ms,
+                "slow_queries_count": perf_stats.metrics.slow_queries_count,
+                "queries_per_minute": perf_stats.queries_per_minute,
+                "uptime_seconds": perf_stats.uptime_seconds
+            },
+            "optimization_status": {
+                "caching_enabled": True,
+                "streaming_enabled": True,
+                "concurrent_queries_enabled": True,
+                "memory_monitoring_enabled": True
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get performance stats: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve performance statistics")
+
+@app.post("/api/performance/cache/clear")
+@handle_api_exception
+async def clear_performance_cache(authenticated: bool = Depends(verify_api_key)):
+    """
+    Clear performance caches for testing or maintenance.
+    
+    Returns:
+        Status of cache clearing operation
+    """
+    try:
+        # Clear all caches
+        response_cache.invalidate_chat_cache()
+        response_cache.invalidate_query_cache()
+        
+        logger.info("Performance caches cleared successfully")
+        
+        return {
+            "status": "success",
+            "message": "All performance caches cleared",
+            "timestamp": time.time()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to clear caches: {e}")
+        raise HTTPException(status_code=500, detail="Failed to clear performance caches")
+
+@app.get("/api/conversations/{conversation_id}/history")
+@handle_api_exception
+async def get_conversation_history(
+    conversation_id: str,
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Get conversation history for a specific conversation.
+    
+    Args:
+        conversation_id: ID of the conversation
+        authenticated: Authentication verification dependency
+        
+    Returns:
+        List of messages in the conversation
+    """
+    logger.info(f"Getting conversation history for: {conversation_id}")
+    
+    try:
+        history = chat_service.get_conversation_history(conversation_id)
+        return {"conversation_id": conversation_id, "messages": history}
+    except Exception as e:
+        logger.error(f"Failed to get conversation history: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve conversation history")
+
+@app.get("/api/conversations/{conversation_id}/context")
+@handle_api_exception
+async def get_conversation_context(
+    conversation_id: str,
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Get conversation context for enhanced processing.
+    
+    Args:
+        conversation_id: ID of the conversation
+        authenticated: Authentication verification dependency
+        
+    Returns:
+        Context information including recent messages and topics
+    """
+    logger.info(f"Getting conversation context for: {conversation_id}")
+    
+    try:
+        context = chat_service.get_conversation_context(conversation_id)
+        return {"conversation_id": conversation_id, "context": context}
+    except Exception as e:
+        logger.error(f"Failed to get conversation context: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve conversation context")
+
+@app.get("/api/conversations/{conversation_id}/summary")
+@handle_api_exception
+async def get_conversation_summary(
+    conversation_id: str,
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Get conversation summary for display purposes.
+    
+    Args:
+        conversation_id: ID of the conversation
+        authenticated: Authentication verification dependency
+        
+    Returns:
+        Summary information about the conversation
+    """
+    logger.info(f"Getting conversation summary for: {conversation_id}")
+    
+    try:
+        summary = chat_service.get_conversation_summary(conversation_id)
+        return summary
+    except Exception as e:
+        logger.error(f"Failed to get conversation summary: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve conversation summary")
+
+@app.delete("/api/conversations/{conversation_id}")
+@handle_api_exception
+async def clear_conversation(
+    conversation_id: str,
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Clear a conversation's history.
+    
+    Args:
+        conversation_id: ID of the conversation to clear
+        authenticated: Authentication verification dependency
+        
+    Returns:
+        Success status
+    """
+    logger.info(f"Clearing conversation: {conversation_id}")
+    
+    try:
+        success = chat_service.clear_conversation_history(conversation_id)
+        if success:
+            return {"message": "Conversation cleared successfully", "conversation_id": conversation_id}
+        else:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to clear conversation: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to clear conversation")
+
+@app.post("/api/conversations/cleanup")
+@handle_api_exception
+async def cleanup_expired_conversations(
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Clean up expired conversations.
+    
+    Args:
+        authenticated: Authentication verification dependency
+        
+    Returns:
+        Number of conversations cleaned up
+    """
+    logger.info("Cleaning up expired conversations")
+    
+    try:
+        cleaned_count = chat_service.cleanup_expired_conversations()
+        return {"message": f"Cleaned up {cleaned_count} expired conversations", "count": cleaned_count}
+    except Exception as e:
+        logger.error(f"Failed to cleanup conversations: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to cleanup conversations")
+        error_response = ConversationalResponse(
+            message="I'm having some trouble right now, but I'm here to help! Let's try a different approach to exploring your data.",
+            chart_config=None,
+            insights=["There was a temporary issue processing your request."],
+            follow_up_questions=[
+                "What would you like to know about your data?",
+                "Should we start with a simple overview?",
+                "Try asking about totals or summaries"
+            ],
+            processing_time_ms=0.0,
+            conversation_id=request.conversation_id or ""
+        )
+        
+        return error_response
 
 @app.get("/api/schema", response_model=Dict[str, Any])
 @handle_api_exception
@@ -1208,6 +1541,151 @@ async def get_dashboard(
     dashboard = dashboards_storage[dashboard_id]
     logger.info(f"Dashboard retrieved: {dashboard.name}")
     return dashboard
+
+@app.get("/api/suggestions/initial")
+@handle_api_exception
+async def get_initial_question_suggestions(
+    table_name: Optional[str] = None,
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Get initial question suggestions when data is uploaded.
+    
+    Args:
+        table_name: Optional specific table name to analyze
+        
+    Returns:
+        Dict containing suggested questions for initial exploration
+    """
+    try:
+        logger.info(f"Getting initial question suggestions for table: {table_name or 'all tables'}")
+        
+        # Get suggestions from chat service
+        suggestions = chat_service.generate_initial_data_questions(table_name)
+        
+        return {
+            "suggestions": suggestions,
+            "table_name": table_name,
+            "suggestion_type": "initial_exploration"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting initial question suggestions: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate initial question suggestions"
+        )
+
+
+@app.get("/api/suggestions/structure")
+@handle_api_exception
+async def get_structure_based_suggestions(authenticated: bool = Depends(verify_api_key)):
+    """
+    Get question suggestions based on available data structure.
+    
+    Returns:
+        Dict containing questions suggested based on data structure
+    """
+    try:
+        logger.info("Getting structure-based question suggestions")
+        
+        # Get schema information
+        schema_info = schema_service.get_all_tables_schema()
+        
+        # Get suggestions from chat service
+        suggestions = chat_service.suggest_questions_from_data_structure(schema_info)
+        
+        return {
+            "suggestions": suggestions,
+            "suggestion_type": "structure_based",
+            "tables_analyzed": list(schema_info.get("tables", {}).keys())
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting structure-based suggestions: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate structure-based suggestions"
+        )
+
+
+@app.get("/api/suggestions/contextual/{conversation_id}")
+@handle_api_exception
+async def get_contextual_suggestions(
+    conversation_id: str,
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Get contextual question suggestions based on conversation history.
+    
+    Args:
+        conversation_id: ID of the conversation
+        
+    Returns:
+        Dict containing contextual question suggestions
+    """
+    try:
+        logger.info(f"Getting contextual suggestions for conversation: {conversation_id}")
+        
+        # Get suggestions from chat service
+        suggestions = chat_service.get_contextual_suggestions(conversation_id)
+        
+        return {
+            "suggestions": suggestions,
+            "conversation_id": conversation_id,
+            "suggestion_type": "contextual"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting contextual suggestions: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate contextual suggestions"
+        )
+
+
+@app.post("/api/insights/proactive")
+@handle_api_exception
+async def get_proactive_insights(
+    request: Dict[str, Any],
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Get proactive insights from query results.
+    
+    Args:
+        request: Dict containing query_results and original_question
+        
+    Returns:
+        Dict containing proactive insights with suggested actions
+    """
+    try:
+        query_results = request.get("query_results")
+        original_question = request.get("original_question", "")
+        
+        if not query_results:
+            raise HTTPException(status_code=400, detail="query_results is required")
+        
+        logger.info(f"Getting proactive insights for question: {original_question[:50]}...")
+        
+        # Get insights from chat service
+        insights = chat_service.get_proactive_insights(query_results, original_question)
+        
+        return {
+            "insights": insights,
+            "original_question": original_question,
+            "insight_count": len(insights)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting proactive insights: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate proactive insights"
+        )
+
 
 @app.post("/api/translate", response_model=Dict[str, str])
 @handle_api_exception

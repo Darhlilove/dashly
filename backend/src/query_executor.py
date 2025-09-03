@@ -27,6 +27,8 @@ try:
         ConcurrentQueryLimitError
     )
     from .logging_config import get_logger, DashlyLogger
+    from .response_cache import get_response_cache
+    from .streaming_response import get_streaming_manager, QueryStreamProcessor
 except ImportError:
     from exceptions import (
         QueryExecutionError,
@@ -38,6 +40,8 @@ except ImportError:
         ConcurrentQueryLimitError
     )
     from logging_config import get_logger, DashlyLogger
+    from response_cache import get_response_cache
+    from streaming_response import get_streaming_manager, QueryStreamProcessor
 
 logger = get_logger(__name__)
 
@@ -296,8 +300,13 @@ class QueryExecutor:
         self.memory_monitor = MemoryMonitor(memory_limit_mb)
         self._execution_lock = threading.Lock()
         
-        logger.info(f"QueryExecutor initialized: timeout={timeout_seconds}s, max_rows={max_rows}, "
-                   f"max_concurrent={max_concurrent}, memory_limit={memory_limit_mb}MB")
+        # Performance optimization components (Requirements 6.1, 6.2)
+        self.response_cache = get_response_cache()
+        self.streaming_manager = get_streaming_manager()
+        self.stream_processor = QueryStreamProcessor(self.streaming_manager)
+        
+        logger.info(f"QueryExecutor initialized with performance optimizations: timeout={timeout_seconds}s, "
+                   f"max_rows={max_rows}, max_concurrent={max_concurrent}, memory_limit={memory_limit_mb}MB")
     
     def execute_query(self, sql: str, timeout: int = None) -> QueryResult:
         """
@@ -321,6 +330,19 @@ class QueryExecutor:
         
         logger.info(f"Executing query {task_id} with timeout {effective_timeout}s: {sql[:100]}...")
         
+        # Check cache first for performance optimization (Requirements 6.1)
+        from .models import ExecuteResponse
+        cached_result = self.response_cache.get_query_result(sql)
+        if cached_result:
+            logger.info(f"Cache hit for query {task_id}: {sql[:50]}...")
+            return QueryResult(
+                columns=cached_result.columns,
+                rows=cached_result.data,
+                row_count=len(cached_result.data),
+                runtime_ms=1.0,  # Very fast for cached
+                truncated=cached_result.truncated if hasattr(cached_result, 'truncated') else False
+            )
+        
         # Acquire concurrent query slot with queuing (Requirements 6.3)
         with self.concurrent_manager.acquire_query_slot(task_id):
             timeout_handler = QueryTimeoutHandler(effective_timeout)
@@ -338,6 +360,24 @@ class QueryExecutor:
                 
                 logger.info(f"Query {task_id} executed successfully in {runtime_ms:.2f}ms, "
                            f"{result.row_count} rows, memory delta: {memory_delta:.2f}MB")
+                
+                # Cache successful results for future use (Requirements 6.1)
+                if runtime_ms < 2000 and result.row_count < 5000:  # Only cache fast, reasonable-sized results
+                    try:
+                        execute_response = ExecuteResponse(
+                            columns=result.columns,
+                            data=[dict(zip(result.columns, row)) for row in result.rows],
+                            row_count=result.row_count,
+                            runtime_ms=runtime_ms,
+                            truncated=result.truncated
+                        )
+                        self.response_cache.cache_query_result(
+                            sql, 
+                            execute_response,
+                            ttl=600  # 10 minutes TTL for query results
+                        )
+                    except Exception as cache_error:
+                        logger.warning(f"Failed to cache query result: {cache_error}")
                 
                 return result
                 
@@ -717,6 +757,26 @@ class QueryExecutor:
                 pass
             # Convert other types to string
             return str(value)
+    
+    async def execute_query_with_streaming(self, sql: str, stream_id: str, timeout: int = None) -> QueryResult:
+        """
+        Execute SQL query with streaming updates for better perceived performance.
+        
+        Args:
+            sql: Validated SQL query to execute
+            stream_id: Stream identifier for progress updates
+            timeout: Optional timeout override (seconds)
+            
+        Returns:
+            QueryResult: Query execution results
+        """
+        # Use streaming processor for better UX (Requirements 6.2)
+        return await self.stream_processor.execute_with_streaming(
+            stream_id,
+            self.execute_query,
+            sql,
+            timeout
+        )
 
 
 # Import required for _add_limit_clause method

@@ -86,3 +86,77 @@ export interface AutomaticExecutionResult {
   executionTime: number;
   fromCache: boolean;
 }
+
+// Chat API Types
+export interface ChatRequest {
+  message: string;
+  conversation_id?: string;
+}
+
+export interface ConversationalResponse {
+  message: string;
+  chart_config?: ChartConfig;
+  insights: string[];
+  follow_up_questions: string[];
+  processing_time_ms: number;
+  conversation_id: string;
+}
+
+export interface ChartConfig {
+  type: "line" | "bar" | "pie" | "scatter" | "area";
+  title?: string;
+  x_axis?: string;
+  y_axis?: string;
+  color_scheme?: string;
+}
+
+// Chat Error Types
+export interface ChatError extends ApiError {
+  suggestions: string[];
+  alternative_questions?: string[];
+  error_type:
+    | "no_data"
+    | "column_not_found"
+    | "syntax_error"
+    | "timeout"
+    | "connection_error"
+    | "general";
+}
+
+// Conversation History Types
+export interface ConversationMessage {
+  id: string;
+  type: "user" | "assistant";
+  content: string;
+  timestamp: string;
+  metadata?: {
+    insights?: string[];
+    follow_up_questions?: string[];
+    chart_config?: ChartConfig;
+    processing_time_ms?: number;
+  };
+}
+
+export interface ConversationHistory {
+  conversation_id: string;
+  messages: ConversationMessage[];
+}
+
+export interface ConversationContext {
+  conversation_id: string;
+  context: {
+    recent_messages: ConversationMessage[];
+    user_questions: string[];
+    assistant_responses: string[];
+    topics: string[];
+    conversation_length: number;
+  };
+}
+
+export interface ConversationSummary {
+  id: string;
+  message_count: number;
+  created_at: string | null;
+  last_updated: string | null;
+  first_question: string | null;
+}

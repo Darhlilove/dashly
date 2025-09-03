@@ -100,15 +100,8 @@ class ResponseGenerator:
             
         except Exception as e:
             logger.error(f"Error generating conversational response: {str(e)}")
-            # Return a fallback response
-            return ConversationalResponse(
-                message="I found some data for your question, but I'm having trouble explaining it clearly. Let me know if you'd like to try rephrasing your question!",
-                chart_config=chart_config,
-                insights=[],
-                follow_up_questions=["What specific aspect of the data interests you most?"],
-                processing_time_ms=query_results.runtime_ms,
-                conversation_id=""
-            )
+            # Return a beginner-friendly fallback response with helpful suggestions
+            return self._generate_fallback_response(query_results, original_question, chart_config, e)
     
     def format_number(self, value: Any, context: str = "") -> str:
         """
@@ -682,6 +675,64 @@ class ResponseGenerator:
             logger.error(f"Error finding numeric insights: {str(e)}")
         
         return insights[:3]  # Limit to top 3 insights
+    
+    def _generate_fallback_response(self, query_results: ExecuteResponse, original_question: str, chart_config: Optional[ChartConfig], error: Exception) -> ConversationalResponse:
+        """
+        Generate a beginner-friendly fallback response when normal processing fails.
+        
+        Args:
+            query_results: The query results that caused issues
+            original_question: User's original question
+            chart_config: Optional chart configuration
+            error: The exception that occurred
+            
+        Returns:
+            ConversationalResponse: User-friendly fallback response
+        """
+        error_message = str(error).lower()
+        
+        # Determine the type of issue and provide appropriate guidance
+        if query_results.row_count == 0:
+            message = "I found your data, but there are no results that match what you're looking for. This might mean the filters are too specific or the data doesn't contain what you're asking about."
+            insights = ["No data matches your specific criteria."]
+            follow_ups = [
+                "Try asking about a broader time period",
+                "Would you like to see what data is available?",
+                "Can we look at the overall summary instead?"
+            ]
+        elif query_results.row_count > 10000:
+            message = "I found a lot of data for your question - maybe too much to make sense of easily. Let me help you focus on the most important parts."
+            insights = [f"Found {self.format_number(query_results.row_count, 'count')} results - that's quite a lot!"]
+            follow_ups = [
+                "Would you like to see just the top results?",
+                "Can we filter this by category or time period?",
+                "Should we look at totals or averages instead?"
+            ]
+        elif "format" in error_message or "parse" in error_message:
+            message = "I found your data, but I'm having trouble presenting it in the best way. The information is there, but let me suggest some clearer ways to explore it."
+            insights = ["The data format is a bit tricky to work with right now."]
+            follow_ups = [
+                "Try asking for specific numbers or totals",
+                "Would you like a simple summary instead?",
+                "Can we look at this data in a different way?"
+            ]
+        else:
+            message = "I found some interesting data for your question, but I'm having trouble explaining it as clearly as I'd like. Let me suggest some other ways to explore what you're looking for."
+            insights = ["The data analysis completed, but the results are complex to explain."]
+            follow_ups = [
+                "What specific aspect interests you most?",
+                "Would you like to try a simpler version of this question?",
+                "Should we break this down into smaller parts?"
+            ]
+        
+        return ConversationalResponse(
+            message=message,
+            chart_config=chart_config,
+            insights=insights,
+            follow_up_questions=follow_ups,
+            processing_time_ms=query_results.runtime_ms,
+            conversation_id=""
+        )
     
     def _find_categorical_insights(self, data: List[Dict[str, Any]], original_question: str) -> List[DataInsight]:
         """Find insights in categorical data."""
