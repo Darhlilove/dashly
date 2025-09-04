@@ -1,4 +1,6 @@
 import { Dashboard } from "../types";
+import { useLoadingState } from "../hooks/useLoadingState";
+import { DataUploadProgress } from "./ProgressIndicator";
 
 interface IntroPageProps {
   onFileUpload: (file: File) => void;
@@ -17,6 +19,7 @@ export default function IntroPage({
   savedDashboards,
   onLoadDashboard,
 }: IntroPageProps) {
+  const { dataUpload } = useLoadingState();
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -51,61 +54,74 @@ export default function IntroPage({
 
         {/* Upload Area */}
         <div className="mb-8">
-          <div
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-            className="border-2 border-dashed border-gray-300 p-12 hover:border-gray-400 transition-colors duration-200"
-          >
-            <div className="flex flex-col items-center">
-              <svg
-                className="w-12 h-12 text-gray-400 mb-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                />
-              </svg>
-
-              <h3 className="text-lg font-medium text-black mb-2">
-                Upload your data
-              </h3>
-              <p className="text-gray-500 mb-6">
-                Drag and drop a CSV file here, or click to browse
-              </p>
-
-              <div className="flex gap-4">
-                <label className="btn-primary cursor-pointer">
-                  <input
-                    type="file"
-                    accept=".csv"
-                    onChange={handleFileChange}
-                    disabled={isLoading}
-                    className="sr-only"
-                  />
-                  Choose File
-                </label>
-
-                <button
-                  onClick={() => {
-                    console.log("Demo button clicked in IntroPage");
-                    onDemoData();
-                  }}
-                  disabled={isLoading}
-                  className="btn-secondary"
-                  data-testid="demo-data-button"
+          {dataUpload.isLoading ? (
+            <div className="border-2 border-dashed border-blue-300 bg-blue-50 p-8 rounded-lg">
+              <DataUploadProgress
+                currentStage={(dataUpload.stage as any) || "uploading"}
+                fileName={
+                  dataUpload.message?.includes("demo") ? "demo data" : undefined
+                }
+                progress={dataUpload.progress}
+                error={dataUpload.error}
+              />
+            </div>
+          ) : (
+            <div
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              className="border-2 border-dashed border-gray-300 p-12 hover:border-gray-400 transition-colors duration-200"
+            >
+              <div className="flex flex-col items-center">
+                <svg
+                  className="w-12 h-12 text-gray-400 mb-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
                 >
-                  {isLoading ? "Loading..." : "Use Demo Data"}
-                </button>
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                  />
+                </svg>
+
+                <h3 className="text-lg font-medium text-black mb-2">
+                  Upload your data
+                </h3>
+                <p className="text-gray-500 mb-6">
+                  Drag and drop a CSV file here, or click to browse
+                </p>
+
+                <div className="flex gap-4">
+                  <label className="btn-primary cursor-pointer">
+                    <input
+                      type="file"
+                      accept=".csv"
+                      onChange={handleFileChange}
+                      disabled={isLoading}
+                      className="sr-only"
+                    />
+                    Choose File
+                  </label>
+
+                  <button
+                    onClick={() => {
+                      console.log("Demo button clicked in IntroPage");
+                      onDemoData();
+                    }}
+                    disabled={isLoading}
+                    className="btn-secondary"
+                    data-testid="demo-data-button"
+                  >
+                    {isLoading ? "Loading..." : "Use Demo Data"}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {error && (
+          {error && !dataUpload.isLoading && (
             <div className="mt-4 p-3 bg-white border border-red-600 border-l-4 text-black">
               {error}
             </div>

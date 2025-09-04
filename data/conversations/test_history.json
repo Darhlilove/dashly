@@ -1,0 +1,58 @@
+{
+  "id": "test_history",
+  "created_at": "2025-09-04T09:22:01.559891",
+  "last_updated": "2025-09-04T09:22:01.560601",
+  "messages": [
+    {
+      "id": "371564bb-d1cd-453e-b101-f5241b480704",
+      "type": "user",
+      "content": "Show me sales data",
+      "timestamp": "2025-09-04T09:22:01.559878",
+      "metadata": {}
+    },
+    {
+      "id": "96d08cc0-58ba-4049-91a1-87fe4486bedf",
+      "type": "assistant",
+      "content": "I can see you're interested in sales data! Based on what I'm seeing, your sales have been showing some interesting patterns. Let me break that down for you in a way that's easy to understand.",
+      "timestamp": "2025-09-04T09:22:01.560040",
+      "metadata": {
+        "insights": [
+          "Your data shows a clear upward trend in the last quarter",
+          "There's an interesting pattern on weekends that might be worth exploring",
+          "The numbers suggest there's room for growth in certain areas"
+        ],
+        "follow_up_questions": [
+          "Would you like to see how this compares to last year?",
+          "Are you interested in breaking this down by category?",
+          "Should we look at the top performers in more detail?"
+        ],
+        "chart_config": null,
+        "processing_time_ms": 0.2269744873046875
+      }
+    },
+    {
+      "id": "525db153-6c6e-4d44-a1c0-a1c627b6b366",
+      "type": "user",
+      "content": "Show me invalid_column",
+      "timestamp": "2025-09-04T09:22:01.560363",
+      "metadata": {}
+    },
+    {
+      "id": "00db9e72-584a-4ff0-b252-bc728111b488",
+      "type": "assistant",
+      "content": "I encountered an issue processing your question. Let me try a different approach or you can rephrase your question.",
+      "timestamp": "2025-09-04T09:22:01.560598",
+      "metadata": {
+        "insights": [
+          "There was a technical issue with the data analysis."
+        ],
+        "follow_up_questions": [
+          "Could you try asking your question differently?",
+          "What other data would you like to explore?"
+        ],
+        "chart_config": null,
+        "processing_time_ms": 0.2739429473876953
+      }
+    }
+  ]
+}

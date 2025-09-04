@@ -33,7 +33,7 @@ import {
   calculateRetryDelay,
 } from "./utils/errorHandling";
 import { ChatMessage } from "./components/MessageRenderer";
-import { ChartConfig as ChartConfigChart } from "./types/chart";
+import { ChartConfig } from "./types/chart";
 import { useErrorHandler } from "./hooks/useErrorHandler";
 import { useSessionCache } from "./hooks/useSessionCache";
 import { useBreakpoint } from "./hooks/useMediaQuery";
@@ -44,6 +44,8 @@ import SettingsModal from "./components/SettingsModal";
 import { performanceMonitor } from "./utils/performance";
 import { usePerformanceMonitor } from "./utils/performanceMonitor";
 import { useAutomaticExecutionPerformance } from "./hooks/useAutomaticExecutionPerformance";
+import { viewStateManager } from "./services/viewStateManager";
+import { useLoadingState } from "./hooks/useLoadingState";
 import "./utils/optimization"; // Load optimization checks
 
 // Initial application state
@@ -77,7 +79,7 @@ const getInitialLayoutState = (breakpoint: string): LayoutState => ({
 // Message adapter to convert between old Message types and new ChatMessage types
 const convertMessageToChatMessage = (
   message: Message,
-  currentChart?: ChartConfigChart,
+  currentChart?: ChartConfig,
   queryResults?: ExecuteResponse
 ): ChatMessage => {
   // Handle different message types
@@ -203,6 +205,9 @@ function App() {
     getPerformanceRecommendations,
   } = useAutomaticExecutionPerformance();
 
+  // Centralized loading state management
+  const loadingState = useLoadingState();
+
   // Global error handler
   const { handleError: handleGlobalError } = useErrorHandler({
     onError: (error) => {
@@ -272,9 +277,78 @@ function App() {
     []
   );
 
-  const handleViewChange = useCallback((view: ViewType) => {
-    setLayoutState((prev) => ({ ...prev, currentView: view }));
-  }, []);
+  const handleViewChange = useCallback(
+    (view: ViewType) => {
+      const currentView = layoutState.currentView;
+
+      // Start view transition loading
+      if (currentView !== view) {
+        loadingState.startViewTransition(currentView, view);
+
+        // Simulate smooth transition
+        setTimeout(() => {
+          // Update ViewStateManager
+          viewStateManager.switchView(view);
+          // Also update layout state for backward compatibility
+          setLayoutState((prev) => ({ ...prev, currentView: view }));
+
+          // Complete transition
+          setTimeout(() => {
+            loadingState.completeViewTransition();
+          }, 200);
+        }, 100);
+      }
+    },
+    [layoutState.currentView, loadingState]
+  );
+
+  /**
+   * Handle dashboard updates from chat responses
+   * Requirements: 2.5, 2.7 - Route chat responses to dashboard view, preserve data view
+   */
+  const handleChatDashboardUpdate = useCallback(
+    (
+      chartConfig: ChartConfig,
+      queryResults?: ExecuteResponse,
+      query?: string
+    ) => {
+      console.log(
+        "📊 Processing chat dashboard update - routing to dashboard view only"
+      );
+
+      // Update dashboard view state through ViewStateManager (never affects data view)
+      // This automatically switches to dashboard view when visualizations are created
+      if (queryResults) {
+        viewStateManager.updateDashboardData(
+          queryResults,
+          chartConfig,
+          query || "",
+          true // Auto-switch to dashboard view
+        );
+      } else {
+        // If no query results provided, just add the chart config
+        viewStateManager.addChart(chartConfig);
+        viewStateManager.switchView("dashboard");
+      }
+
+      // Update legacy state for backward compatibility
+      setState((prev) => ({
+        ...prev,
+        queryResults: queryResults || prev.queryResults,
+        currentChart: chartConfig,
+        currentQuery: query || prev.currentQuery,
+      }));
+
+      // Update layout state to reflect view change
+      setLayoutState((prev) => ({ ...prev, currentView: "dashboard" }));
+
+      console.log(
+        "✅ Chat response routed to dashboard view, data view preserved"
+      );
+      addNotification("success", "Dashboard updated with new visualization");
+    },
+    [addNotification]
+  );
 
   const handleMobileViewChange = useCallback(
     (view: "chat" | "data" | "dashboard") => {
@@ -448,8 +522,28 @@ function App() {
       error: null,
     }));
 
+    // Start loading state management
+    loadingState.startDataUpload(file.name);
+    viewStateManager.setDataViewLoading(true);
+
     try {
+      // Update progress through stages
+      loadingState.updateDataUploadStage("validating", 10, file.name);
+
+      // Simulate validation delay for better UX
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      loadingState.updateDataUploadStage("uploading", 30, file.name);
+
       const response = await apiService.uploadFile(file);
+
+      loadingState.updateDataUploadStage("processing", 80, file.name);
+
+      // Update data view state through ViewStateManager
+      viewStateManager.updateRawData(response);
+
+      loadingState.updateDataUploadStage("complete", 100, file.name);
+
       setState((prev) => ({
         ...prev,
         uploadStatus: "completed",
@@ -459,6 +553,11 @@ function App() {
       addNotification("success", `Successfully uploaded ${file.name}`);
     } catch (error) {
       const apiError = error as ApiError;
+
+      // Set loading error
+      loadingState.setError("dataUpload", apiError.message);
+      viewStateManager.setDataViewError(apiError.message);
+
       setState((prev) => ({
         ...prev,
         uploadStatus: "error",
@@ -479,52 +578,43 @@ function App() {
       error: null,
     }));
 
+    // Start loading state management for demo data
+    loadingState.startDataUpload("demo data");
+    viewStateManager.setDataViewLoading(true);
+
     try {
       console.log("App: Calling apiService.useDemoData()");
 
+      loadingState.updateDataUploadStage("validating", 20, "demo data");
+
       const response = await apiService.useDemoData();
+
+      loadingState.updateDataUploadStage("processing", 70, "demo data");
 
       console.log("App: Received response:", response);
       console.log("App: Response type:", typeof response);
       console.log("App: Response keys:", Object.keys(response || {}));
 
-      // After loading demo data structure, also fetch sample data to display
-      try {
-        console.log("App: Fetching sample demo data for display");
-        const sampleDataResponse = await apiService.executeSQL(
-          `SELECT * FROM ${response.table} LIMIT 100`,
-          "Sample demo data"
-        );
+      // Update data view state through ViewStateManager
+      viewStateManager.updateRawData(response);
 
-        setState((prev) => ({
-          ...prev,
-          uploadStatus: "completed",
-          tableInfo: response,
-          queryResults: sampleDataResponse, // Add sample data for display
-          currentQuery: "Sample demo data",
-          currentSQL: `SELECT * FROM ${response.table} LIMIT 100`,
-          isLoading: false,
-        }));
+      loadingState.updateDataUploadStage("complete", 100, "demo data");
 
-        console.log("App: State updated with demo data and sample rows");
-        addNotification(
-          "success",
-          "Demo data loaded successfully with sample preview"
-        );
-      } catch (sampleError) {
-        // If sample data fetch fails, still show the table structure
-        console.warn(
-          "App: Failed to fetch sample data, showing structure only:",
-          sampleError
-        );
-        setState((prev) => ({
-          ...prev,
-          uploadStatus: "completed",
-          tableInfo: response,
-          isLoading: false,
-        }));
-        addNotification("success", "Demo data loaded successfully");
-      }
+      setState((prev) => ({
+        ...prev,
+        uploadStatus: "completed",
+        tableInfo: response,
+        isLoading: false,
+      }));
+
+      console.log("App: State updated with demo data and sample rows");
+      const sampleRowCount = response.sample_rows?.length || 0;
+      addNotification(
+        "success",
+        `Demo data loaded successfully${
+          sampleRowCount > 0 ? ` with ${sampleRowCount} sample rows` : ""
+        }`
+      );
     } catch (error) {
       console.error("App: Demo data error:", error);
       console.error("App: Error type:", typeof error);
@@ -534,6 +624,10 @@ function App() {
         error instanceof Error
           ? error.message
           : (error as ApiError)?.message || "Unknown error occurred";
+
+      // Set loading error
+      loadingState.setError("dataUpload", errorMessage);
+      viewStateManager.setDataViewError(errorMessage);
 
       setState((prev) => ({
         ...prev,
@@ -643,6 +737,9 @@ function App() {
 
         setMessages((prev) => [...prev, errorMessage]);
 
+        // Set dashboard view error for translation failures
+        viewStateManager.setDashboardViewError(apiError.message);
+
         setState((prev) => ({
           ...prev,
           error: apiError.message,
@@ -675,6 +772,10 @@ function App() {
           queryLength: query.length,
         };
 
+        // Start loading state management for query execution
+        loadingState.startQueryExecution(query);
+        viewStateManager.setDashboardViewLoading(true);
+
         setState((prev) => ({
           ...prev,
           isExecutingQuery: true,
@@ -691,13 +792,23 @@ function App() {
           };
           setMessages((prev) => [...prev, executionStatusMessage]);
 
+          // Update loading stage to translating
+          loadingState.updateQueryExecutionStage("translating", 10, query);
+
           // Use the API service's automatic execution method for comprehensive performance tracking
           const automaticExecutionStart = performance.now();
+
+          // Update to executing stage
+          loadingState.updateQueryExecutionStage("executing", 50, query);
+
           const automaticResult = await apiService.executeQueryAutomatically(
             query
           );
           const automaticExecutionTime =
             performance.now() - automaticExecutionStart;
+
+          // Update to chart generation stage
+          loadingState.updateQueryExecutionStage("generating_chart", 80, query);
 
           // Extract results from the automatic execution
           const translationResponse = automaticResult.translationResult;
@@ -797,6 +908,14 @@ function App() {
           };
           setMessages((prev) => [...prev, successMessage]);
 
+          // Update dashboard state through ViewStateManager (never affects data view)
+          viewStateManager.updateDashboardData(
+            executionResponse,
+            chartConfig,
+            query,
+            true // Auto-switch to dashboard view when new visualizations are created
+          );
+
           setState((prev) => ({
             ...prev,
             queryResults: executionResponse,
@@ -805,6 +924,9 @@ function App() {
             isExecutingQuery: false,
             lastExecutionTime: totalPipelineTime,
           }));
+
+          // Complete loading state
+          loadingState.updateQueryExecutionStage("complete", 100, query);
 
           performanceMetrics.uiUpdateTime = performance.now() - uiUpdateStart;
 
@@ -935,6 +1057,9 @@ function App() {
           const isTranslationError = !state.currentSQL;
           const errorPhase = isTranslationError ? "translation" : "execution";
 
+          // Set loading error
+          loadingState.setError("queryExecution", apiError.message);
+
           // Create enhanced error with user-friendly messaging and suggestions
           const executionError = createUserFriendlyError(
             apiError,
@@ -1013,6 +1138,9 @@ function App() {
 
           setMessages((prev) => [...prev, errorMessage]);
 
+          // Set dashboard view error
+          viewStateManager.setDashboardViewError(apiError.message);
+
           setState((prev) => ({
             ...prev,
             error: apiError.message,
@@ -1073,6 +1201,9 @@ function App() {
 
   // Handle SQL execution
   const handleSQLExecution = async (sql: string) => {
+    // Set dashboard view loading state
+    viewStateManager.setDashboardViewLoading(true);
+
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
     try {
@@ -1102,6 +1233,14 @@ function App() {
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, successMessage]);
+
+      // Update dashboard state through ViewStateManager (never affects data view)
+      viewStateManager.updateDashboardData(
+        response,
+        chartConfig,
+        state.currentQuery,
+        true // Auto-switch to dashboard view when new visualizations are created
+      );
 
       setState((prev) => ({
         ...prev,
@@ -1159,6 +1298,9 @@ function App() {
       );
 
       setMessages((prev) => [...prev, errorMessage]);
+
+      // Set dashboard view error
+      viewStateManager.setDashboardViewError(apiError.message);
 
       setState((prev) => ({
         ...prev,
@@ -1418,6 +1560,8 @@ function App() {
                     onSendMessage={handleQuery}
                     isProcessing={state.isLoading}
                     placeholder="Ask me anything about your data..."
+                    onDashboardUpdate={handleChatDashboardUpdate}
+                    enableViewStateManagement={true}
                   />
                 ) : (
                   <DashboardWorkspace
@@ -1455,6 +1599,8 @@ function App() {
                   onSendMessage={handleQuery}
                   isProcessing={state.isLoading}
                   placeholder="Ask me anything about your data..."
+                  onDashboardUpdate={handleChatDashboardUpdate}
+                  enableViewStateManagement={true}
                 />
               }
               dashboardContent={

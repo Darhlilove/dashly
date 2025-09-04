@@ -13,10 +13,12 @@ try:
     from .logging_config import get_logger
     from .exceptions import ValidationError, ConfigurationError
     from .response_cache import get_response_cache
+    from .llm_rate_limiter import llm_rate_limiter
 except ImportError:
     from logging_config import get_logger
     from exceptions import ValidationError, ConfigurationError
     from response_cache import get_response_cache
+    from llm_rate_limiter import llm_rate_limiter
 
 logger = get_logger(__name__)
 
@@ -62,8 +64,23 @@ class LLMService:
                 "OPENROUTER_API_KEY environment variable must be set with a valid API key"
             )
         
+        # Validate API key format for OpenRouter
+        if not api_key.startswith("sk-or-v1-"):
+            raise ConfigurationError(
+                "Invalid OpenRouter API key format. Key should start with 'sk-or-v1-'"
+            )
+        
+        if len(api_key) < 50:  # OpenRouter keys are typically longer
+            raise ConfigurationError(
+                "OpenRouter API key appears to be too short. Please verify the key."
+            )
+        
         model = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet:beta")
         base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        
+        # Validate base URL
+        if not base_url.startswith("https://"):
+            raise ConfigurationError("LLM service base URL must use HTTPS")
         
         return LLMConfig(
             api_key=api_key,
@@ -71,23 +88,28 @@ class LLMService:
             base_url=base_url
         )
     
-    async def translate_to_sql(self, question: str, schema_info: Dict[str, Any]) -> str:
+    async def translate_to_sql(self, question: str, schema_info: Dict[str, Any], client_id: str = "default") -> str:
         """
         Translate natural language question to SQL query.
         
         Args:
             question: Natural language question about the data
             schema_info: Database schema information including tables and columns
+            client_id: Unique identifier for rate limiting (IP, session, etc.)
             
         Returns:
             str: Generated SQL query
             
         Raises:
-            ValidationError: If question is invalid
+            ValidationError: If question is invalid or rate limited
             Exception: If LLM API call fails
         """
         if not question or not question.strip():
             raise ValidationError("Question cannot be empty")
+        
+        # Apply rate limiting for LLM calls
+        estimated_tokens = min(len(question) * 2 + 500, 1500)  # Rough estimate
+        await llm_rate_limiter.check_rate_limit(client_id, estimated_tokens)
         
         # Build schema context for the LLM
         schema_context = self._build_schema_context(schema_info)
@@ -103,6 +125,8 @@ class LLMService:
             cached_sql = self.response_cache.get_llm_response(cache_key, self.config.model)
             if cached_sql:
                 logger.info("Cache hit for SQL translation")
+                # Still record the call for rate limiting (but with 0 tokens since cached)
+                llm_rate_limiter.record_call(client_id, 0, self.config.model, True)
                 return cached_sql
             
             # Make API call to OpenRouter
@@ -132,6 +156,10 @@ class LLMService:
             # Extract SQL from response
             sql_query = result["choices"][0]["message"]["content"].strip()
             
+            # Record successful API call with actual token usage
+            tokens_used = result.get("usage", {}).get("total_tokens", estimated_tokens)
+            llm_rate_limiter.record_call(client_id, tokens_used, self.config.model, True)
+            
             # Clean up the SQL query
             sql_query = self._clean_sql_query(sql_query)
             
@@ -147,15 +175,23 @@ class LLMService:
             return sql_query
             
         except httpx.HTTPStatusError as e:
+            # Record failed API call
+            llm_rate_limiter.record_call(client_id, 0, self.config.model, False)
             logger.error(f"OpenRouter API error: {e.response.status_code} - {e.response.text}")
             raise Exception(f"LLM API error: {e.response.status_code}")
         except httpx.RequestError as e:
+            # Record failed API call
+            llm_rate_limiter.record_call(client_id, 0, self.config.model, False)
             logger.error(f"OpenRouter request error: {str(e)}")
             raise Exception("Failed to connect to LLM service")
         except (KeyError, IndexError) as e:
+            # Record failed API call
+            llm_rate_limiter.record_call(client_id, 0, self.config.model, False)
             logger.error(f"Invalid LLM response format: {str(e)}")
             raise Exception("Invalid response from LLM service")
         except Exception as e:
+            # Record failed API call
+            llm_rate_limiter.record_call(client_id, 0, self.config.model, False)
             logger.error(f"Unexpected LLM error: {str(e)}")
             raise Exception(f"LLM translation failed: {str(e)}")
     

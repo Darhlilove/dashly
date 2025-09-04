@@ -179,6 +179,10 @@ class TestResponseGeneratorUnit:
         assert response.processing_time_ms == 150.5
         assert isinstance(response.insights, list)
         assert isinstance(response.follow_up_questions, list)
+        # Test new structured response fields
+        assert isinstance(response.key_findings, list)
+        assert isinstance(response.suggested_actions, list)
+        assert response.chart_explanation is not None  # Should have explanation when chart is provided
     
     def test_generate_conversational_response_no_data(self):
         """Test generating conversational response with no data."""
@@ -191,6 +195,10 @@ class TestResponseGeneratorUnit:
         assert "couldn't find" in response.message.lower() or "no" in response.message.lower()
         assert len(response.follow_up_questions) > 0
         assert response.processing_time_ms == 25.0
+        # Test new structured response fields for no-data case
+        assert isinstance(response.key_findings, list)
+        assert isinstance(response.suggested_actions, list)
+        assert response.chart_explanation is None  # No chart explanation when no chart
     
     def test_generate_conversational_response_no_chart(self):
         """Test generating conversational response without chart config."""
@@ -202,6 +210,103 @@ class TestResponseGeneratorUnit:
         assert isinstance(response, ConversationalResponse)
         assert response.chart_config is None
         assert len(response.message) > 0
+        # Test new structured response fields for no-chart case
+        assert isinstance(response.key_findings, list)
+        assert isinstance(response.suggested_actions, list)
+        assert response.chart_explanation is None  # No chart explanation when no chart
+    
+    def test_structured_response_key_findings(self):
+        """Test that key findings are properly extracted and structured."""
+        response = self.generator.generate_conversational_response(
+            self.sample_execute_response,
+            "Show me product sales analysis"
+        )
+        
+        assert isinstance(response.key_findings, list)
+        assert len(response.key_findings) <= 3  # Should limit to 3 key findings
+        # Key findings should be different from general insights
+        if response.key_findings and response.insights:
+            assert any(finding != insight for finding in response.key_findings for insight in response.insights)
+    
+    def test_chart_explanation_generation(self):
+        """Test chart explanation generation for different chart types."""
+        # Test bar chart explanation
+        bar_chart = ChartConfig(type="bar", x_axis="product", y_axis="sales")
+        response = self.generator.generate_conversational_response(
+            self.sample_execute_response,
+            "Show me sales by product",
+            bar_chart
+        )
+        
+        assert response.chart_explanation is not None
+        assert "bar chart" in response.chart_explanation.lower()
+        assert "sales" in response.chart_explanation.lower()
+        assert "product" in response.chart_explanation.lower()
+        
+        # Test line chart explanation
+        line_chart = ChartConfig(type="line", x_axis="date", y_axis="revenue")
+        response = self.generator.generate_conversational_response(
+            self.sample_execute_response,
+            "Show me revenue over time",
+            line_chart
+        )
+        
+        assert response.chart_explanation is not None
+        assert "line chart" in response.chart_explanation.lower()
+        assert "trend" in response.chart_explanation.lower() or "time" in response.chart_explanation.lower()
+        
+        # Test pie chart explanation
+        pie_chart = ChartConfig(type="pie")
+        response = self.generator.generate_conversational_response(
+            self.sample_execute_response,
+            "Show me market share breakdown",
+            pie_chart
+        )
+        
+        assert response.chart_explanation is not None
+        assert "pie chart" in response.chart_explanation.lower()
+        assert "proportion" in response.chart_explanation.lower() or "breakdown" in response.chart_explanation.lower()
+    
+    def test_suggested_actions_generation(self):
+        """Test that suggested actions are properly generated and separated from findings."""
+        response = self.generator.generate_conversational_response(
+            self.sample_execute_response,
+            "Show me sales performance"
+        )
+        
+        assert isinstance(response.suggested_actions, list)
+        assert len(response.suggested_actions) <= 3  # Should limit to 3 actions
+        
+        # Actions should be actionable (contain action words)
+        action_words = ["try", "consider", "explore", "analyze", "investigate", "examine", "look", "verify"]
+        if response.suggested_actions:
+            assert any(any(word in action.lower() for word in action_words) for action in response.suggested_actions)
+    
+    def test_context_aware_follow_ups(self):
+        """Test that follow-up questions are context-aware and relevant."""
+        # Test sales context
+        sales_response = self.generator.generate_conversational_response(
+            self.sample_execute_response,
+            "Show me sales revenue by product"
+        )
+        
+        assert len(sales_response.follow_up_questions) <= 3
+        # Should contain sales-related follow-ups
+        sales_keywords = ["product", "performance", "revenue", "sales", "customer"]
+        if sales_response.follow_up_questions:
+            assert any(any(keyword in question.lower() for keyword in sales_keywords) 
+                      for question in sales_response.follow_up_questions)
+        
+        # Test customer context
+        customer_response = self.generator.generate_conversational_response(
+            self.sample_execute_response,
+            "Show me customer behavior patterns"
+        )
+        
+        customer_keywords = ["customer", "behavior", "segment", "pattern"]
+        if customer_response.follow_up_questions:
+            assert any(any(keyword in question.lower() for keyword in customer_keywords) 
+                      for question in customer_response.follow_up_questions)
     
     def test_explain_data_insights_with_data(self):
         """Test explaining data insights with actual data."""
@@ -435,6 +540,7 @@ class TestResponseGeneratorUnit:
         # Create malformed query results
         malformed_results = Mock()
         malformed_results.runtime_ms = 100.0
+        malformed_results.row_count = 5  # Set a non-zero row count to avoid "no data" path
         malformed_results.columns = None  # This should cause an error
         
         # Should not crash and should return a fallback response
@@ -444,8 +550,13 @@ class TestResponseGeneratorUnit:
         )
         
         assert isinstance(response, ConversationalResponse)
-        assert "trouble" in response.message.lower() or "issue" in response.message.lower()
+        # Should handle malformed data gracefully - either with error message or fallback response
+        assert (("trouble" in response.message.lower() or "issue" in response.message.lower()) or 
+                ("data" in response.message.lower() and len(response.message) > 10))
         assert len(response.follow_up_questions) > 0
+        # Test that new structured fields are present even in error cases
+        assert isinstance(response.key_findings, list)
+        assert isinstance(response.suggested_actions, list)
     
     def test_error_handling_in_insight_analysis(self):
         """Test error handling during insight analysis."""

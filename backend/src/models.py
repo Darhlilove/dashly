@@ -18,6 +18,8 @@ class UploadResponse(BaseModel):
     table: str
     columns: List[ColumnInfo]
     suggested_questions: Optional[List[str]] = None
+    sample_rows: Optional[List[List[Any]]] = None  # Sample data for immediate display
+    total_rows: Optional[int] = None  # Total number of rows in the table
 
 
 class TableSchema(BaseModel):
@@ -201,3 +203,7 @@ class ConversationalResponse(BaseModel):
     follow_up_questions: List[str] = []
     processing_time_ms: float
     conversation_id: str
+    # Enhanced structured response fields
+    key_findings: List[str] = []  # Separate key findings from general insights
+    chart_explanation: Optional[str] = None  # Explanation of what the chart shows
+    suggested_actions: List[str] = []  # Clear separation of actions from findings

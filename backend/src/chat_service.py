@@ -229,9 +229,29 @@ class ChatService:
             conversation_context = {
                 "conversation_history": self.get_conversation_history(conversation_id)
             }
-            error_response = self.error_handler.handle_chat_error(
-                e, request.message, conversation_id, conversation_context
-            )
+            
+            # Try to get data information for better error context
+            data_info = None
+            try:
+                if hasattr(self, 'db_manager') and self.db_manager:
+                    # Get available tables and basic info
+                    data_info = {
+                        "tables": {},  # Could be populated with actual table info
+                        "has_data": True  # Basic check
+                    }
+            except Exception:
+                pass  # Ignore errors when getting data info
+            
+            # Use contextual error response if we have data info
+            if data_info:
+                error_response = self.error_handler.generate_contextual_error_response(
+                    e, request.message, conversation_id, conversation_context, data_info
+                )
+            else:
+                error_response = self.error_handler.handle_chat_error(
+                    e, request.message, conversation_id, conversation_context
+                )
+            
             error_response.processing_time_ms = processing_time
             return error_response
     
@@ -341,47 +361,7 @@ class ChatService:
             else:
                 query_results = execute_result
             
-            # Step 3: Generate conversational explanation using enhanced LLM service
-            explanation_result = self.llm_service.generate_conversational_explanation(
-                query_results, 
-                user_message,
-                context={"previous_questions": previous_questions}
-            )
-            if hasattr(explanation_result, '__await__'):
-                conversational_explanation = await explanation_result
-            else:
-                conversational_explanation = explanation_result
-            
-            # Step 4: Generate business insights using enhanced LLM service
-            insights_result = self.llm_service.generate_data_insights(
-                query_results, 
-                user_message
-            )
-            if hasattr(insights_result, '__await__'):
-                llm_insights = await insights_result
-            else:
-                llm_insights = insights_result
-            
-            # Step 5: Generate follow-up questions using enhanced LLM service
-            followups_result = self.llm_service.generate_follow_up_questions(
-                query_results, 
-                user_message,
-                conversation_context=previous_questions
-            )
-            if hasattr(followups_result, '__await__'):
-                llm_follow_ups = await followups_result
-            else:
-                llm_follow_ups = followups_result
-            
-            # Step 6: Analyze the results for additional insights using InsightAnalyzer
-            analysis_results = self.insight_analyzer.analyze_query_results(query_results, user_message)
-            
-            # Step 7: Combine insights from LLM and analyzer
-            combined_insights = []
-            combined_insights.extend(llm_insights)
-            combined_insights.extend([insight.message for insight in analysis_results["all_insights"][:2]])
-            
-            # Step 8: Generate automatic chart recommendation for dashboard updates
+            # Step 3: Generate chart recommendation for dashboard updates
             chart_config = self.chart_recommendation_service.recommend_chart_config(
                 query_results, user_message
             )
@@ -391,15 +371,33 @@ class ChatService:
             else:
                 logger.debug("No chart recommendation generated - data not suitable for visualization")
             
-            # Step 9: Generate proactive insights from the query results
+            # Step 4: Use enhanced ResponseGenerator for conversational response
+            conversational_response = self.response_generator.generate_conversational_response(
+                query_results, 
+                user_message,
+                chart_config=chart_config
+            )
+            
+            # Extract components from the response
+            conversational_explanation = conversational_response.message
+            combined_insights = list(conversational_response.insights)  # Make a copy
+            combined_follow_ups = list(conversational_response.follow_up_questions)  # Make a copy
+            
+            # Step 5: Analyze the results for additional insights using InsightAnalyzer
+            analysis_results = self.insight_analyzer.analyze_query_results(query_results, user_message)
+            
+            # Step 6: Enhance insights with analyzer results (add up to 2 additional insights)
+            analyzer_insights = [insight.message for insight in analysis_results.get("all_insights", [])[:2]]
+            combined_insights.extend(analyzer_insights)
+            
+            # Step 7: Generate proactive insights from the query results
             proactive_insights = self.get_proactive_insights(query_results, user_message)
             
-            # Add proactive insight messages to combined insights
-            for proactive_insight in proactive_insights[:2]:  # Limit to 2 proactive insights
+            # Add proactive insight messages to combined insights (limit to 2)
+            for proactive_insight in proactive_insights[:2]:
                 combined_insights.append(proactive_insight["message"])
             
-            # Step 10: Combine follow-up questions, prioritizing LLM-generated ones
-            combined_follow_ups = llm_follow_ups
+            # Step 8: Enhance follow-up questions with analyzer and contextual suggestions
             if len(combined_follow_ups) < 3:
                 analyzer_questions = analysis_results.get("follow_up_questions", [])
                 combined_follow_ups.extend(analyzer_questions[:3 - len(combined_follow_ups)])

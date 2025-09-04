@@ -9,6 +9,7 @@ import React, {
 import { UploadResponse } from "../types";
 import LoadingSpinner from "./LoadingSpinner";
 import { withLayoutErrorBoundary } from "./LayoutErrorBoundary";
+import { DataProcessingLoading } from "./LoadingState";
 import {
   usePerformanceMonitor,
   detectDatasetPerformanceIssues,
@@ -26,6 +27,10 @@ interface DataTableViewProps {
   enableSearch?: boolean;
   enableSort?: boolean;
   enableExport?: boolean;
+  loadingStage?: "loading" | "processing" | "rendering" | "complete";
+  loadingMessage?: string;
+  rowsLoaded?: number;
+  totalRows?: number;
 }
 
 type SortDirection = "asc" | "desc" | null;
@@ -52,6 +57,10 @@ const DataTableView: React.FC<DataTableViewProps> = memo(
     enableSearch = true,
     enableSort = true,
     enableExport = true,
+    loadingStage = "loading",
+    loadingMessage,
+    rowsLoaded,
+    totalRows,
   }) => {
     const { columns } = tableInfo;
     const containerRef = useRef<HTMLDivElement>(null);
@@ -517,11 +526,23 @@ const DataTableView: React.FC<DataTableViewProps> = memo(
 
         {/* Loading state */}
         {isLoading && (
-          <div className="border-t border-gray-200 p-4 text-center">
-            <LoadingSpinner size="sm" />
-            <span className="ml-2 text-sm text-gray-500">
-              Loading more data...
-            </span>
+          <div className="border-t border-gray-200 p-4">
+            {loadingStage === "loading" && onLoadMore ? (
+              <div className="text-center">
+                <LoadingSpinner size="sm" />
+                <span className="ml-2 text-sm text-gray-500">
+                  {loadingMessage || "Loading more data..."}
+                </span>
+              </div>
+            ) : (
+              <DataProcessingLoading
+                isLoading={true}
+                stage={loadingStage === "processing" ? "parsing" : "storing"}
+                fileName={tableInfo.table}
+                rowsProcessed={rowsLoaded}
+                totalRows={totalRows}
+              />
+            )}
           </div>
         )}
 

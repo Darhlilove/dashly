@@ -1,6 +1,7 @@
 // Chart Configuration Types for automatic chart selection
 
 export interface ChartConfig {
+  id?: string; // Optional ID for chart management
   type: "line" | "bar" | "pie" | "table";
   x?: string;
   y?: string;

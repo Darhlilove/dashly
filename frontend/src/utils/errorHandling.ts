@@ -174,7 +174,7 @@ export function createUserFriendlyError(
 // Create error message for conversation display
 export function createErrorMessage(
   executionError: ExecutionError,
-  query?: string
+  _query?: string // Reserved for future use in error context
 ): ErrorMessage {
   return {
     id: generateId(),

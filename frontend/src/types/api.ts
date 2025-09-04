@@ -3,6 +3,9 @@
 export interface UploadResponse {
   table: string;
   columns: Array<{ name: string; type: string }>;
+  suggested_questions?: string[];
+  sample_rows?: any[][]; // Sample data for immediate display
+  total_rows?: number; // Total number of rows in the table
 }
 
 export interface TranslateResponse {
@@ -95,20 +98,14 @@ export interface ChatRequest {
 
 export interface ConversationalResponse {
   message: string;
-  chart_config?: ChartConfig;
+  chart_config?: any; // Will be typed as ChartConfig from chart.ts when imported
   insights: string[];
   follow_up_questions: string[];
   processing_time_ms: number;
   conversation_id: string;
 }
 
-export interface ChartConfig {
-  type: "line" | "bar" | "pie" | "scatter" | "area";
-  title?: string;
-  x_axis?: string;
-  y_axis?: string;
-  color_scheme?: string;
-}
+// ChartConfig moved to chart.ts to avoid conflicts
 
 // Chat Error Types
 export interface ChatError extends ApiError {
@@ -132,7 +129,7 @@ export interface ConversationMessage {
   metadata?: {
     insights?: string[];
     follow_up_questions?: string[];
-    chart_config?: ChartConfig;
+    chart_config?: any; // Will be typed as ChartConfig from chart.ts when imported
     processing_time_ms?: number;
   };
 }

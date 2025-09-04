@@ -59,6 +59,7 @@ try:
         DatabaseError,
         SchemaExtractionError,
         ValidationError,
+        SecurityError,
         QueryExecutionError,
         SQLSyntaxError,
         SQLSecurityError,
@@ -112,6 +113,7 @@ except ImportError:
         DatabaseError,
         SchemaExtractionError,
         ValidationError,
+        SecurityError,
         QueryExecutionError,
         SQLSyntaxError,
         SQLSecurityError,
@@ -540,6 +542,49 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
+@app.get("/api/security/stats")
+async def get_security_stats(
+    authenticated: bool = Depends(verify_api_key)
+):
+    """
+    Get security and rate limiting statistics.
+    
+    Returns:
+        Dict: Security statistics including rate limiting and sanitization stats
+    """
+    try:
+        # Import components for stats
+        try:
+            from .input_sanitizer import input_sanitizer
+            from .llm_rate_limiter import llm_rate_limiter
+        except ImportError:
+            from input_sanitizer import input_sanitizer
+            from llm_rate_limiter import llm_rate_limiter
+        
+        # Get sanitization stats
+        sanitizer_stats = input_sanitizer.get_security_stats()
+        
+        # Get rate limiting stats
+        rate_limit_stats = llm_rate_limiter.get_global_stats()
+        
+        # Import SecurityConfig
+        try:
+            from .auth import SecurityConfig
+        except ImportError:
+            from auth import SecurityConfig
+        
+        return {
+            "security_status": "active",
+            "input_sanitization": sanitizer_stats,
+            "rate_limiting": rate_limit_stats,
+            "authentication_enabled": SecurityConfig.REQUIRE_AUTH,
+            "timestamp": time.time()
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get security stats: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve security statistics")
+
 @app.post("/api/test")
 async def test_endpoint(request: Request):
     """Test endpoint to debug request handling"""
@@ -638,6 +683,16 @@ async def upload_csv(
         logger.error(f"DatabaseManager error: {type(e).__name__}: {str(e)}")
         raise
     
+    # Get sample data for immediate display in DataTableView
+    try:
+        logger.info(f"Fetching sample data for table: {table_metadata.table_name}")
+        table_info = db_manager.get_table_info(table_metadata.table_name)
+        logger.info(f"Retrieved {len(table_info.sample_data)} sample rows")
+    except Exception as e:
+        logger.warning(f"Failed to fetch sample data: {str(e)}")
+        # Continue without sample data if fetch fails
+        table_info = None
+    
     # Generate initial question suggestions for the uploaded data
     try:
         initial_suggestions = chat_service.generate_initial_data_questions(table_metadata.table_name)
@@ -650,13 +705,28 @@ async def upload_csv(
             "What are the main patterns in my data?"
         ]
     
-    # Return successful response
+    # Return successful response with sample data
     logger.info(f"Upload completed successfully: {table_metadata.table_name}")
-    return UploadResponse(
+    response = UploadResponse(
         table=table_metadata.table_name,
         columns=table_metadata.columns,
         suggested_questions=initial_suggestions[:5]  # Limit to 5 suggestions
     )
+    
+    # Add sample data if available
+    if table_info and table_info.sample_data:
+        # Convert sample data to the format expected by frontend (list of lists)
+        sample_rows = []
+        for row_dict in table_info.sample_data:
+            row_list = [row_dict.get(col.name, "") for col in table_metadata.columns]
+            sample_rows.append(row_list)
+        
+        # Add sample data to response (we'll need to update the model)
+        response.sample_rows = sample_rows
+        response.total_rows = table_info.total_rows
+        logger.info(f"Added {len(sample_rows)} sample rows to response")
+    
+    return response
 
 @app.post("/api/demo", response_model=UploadResponse)
 @handle_api_exception
@@ -735,6 +805,16 @@ async def use_demo_data(
         logger.error(f"DatabaseManager error: {type(e).__name__}: {str(e)}")
         raise
     
+    # Get sample data for immediate display in DataTableView
+    try:
+        logger.info(f"Fetching sample data for demo table: {table_metadata.table_name}")
+        table_info = db_manager.get_table_info(table_metadata.table_name)
+        logger.info(f"Retrieved {len(table_info.sample_data)} sample rows for demo")
+    except Exception as e:
+        logger.warning(f"Failed to fetch sample data for demo: {str(e)}")
+        # Continue without sample data if fetch fails
+        table_info = None
+    
     # Generate initial question suggestions for the demo data
     try:
         initial_suggestions = chat_service.generate_initial_data_questions(table_metadata.table_name)
@@ -747,13 +827,28 @@ async def use_demo_data(
             "How can I explore this dataset?"
         ]
     
-    # Return successful response
+    # Return successful response with sample data
     logger.info(f"Demo data loaded successfully: {table_metadata.table_name}")
-    return UploadResponse(
+    response = UploadResponse(
         table=table_metadata.table_name,
         columns=table_metadata.columns,
         suggested_questions=initial_suggestions[:5]  # Limit to 5 suggestions
     )
+    
+    # Add sample data if available
+    if table_info and table_info.sample_data:
+        # Convert sample data to the format expected by frontend (list of lists)
+        sample_rows = []
+        for row_dict in table_info.sample_data:
+            row_list = [row_dict.get(col.name, "") for col in table_metadata.columns]
+            sample_rows.append(row_list)
+        
+        # Add sample data to response
+        response.sample_rows = sample_rows
+        response.total_rows = table_info.total_rows
+        logger.info(f"Added {len(sample_rows)} sample rows to demo response")
+    
+    return response
 
 @app.post("/api/query", response_model=QueryResponse)
 @handle_api_exception
@@ -775,11 +870,70 @@ async def process_query(request: QueryRequest, authenticated: bool = Depends(ver
         sql_to_execute = request.sql_query
         logger.info("Using provided SQL query")
     else:
-        # TODO: Implement LLM integration for NL to SQL translation
-        # For now, return a mock response with validation
-        mock_sql = "SELECT * FROM sales LIMIT 10"
-        sql_to_execute = sql_validator.validate_query_legacy(mock_sql)
-        logger.info("Using mock SQL query (LLM integration pending)")
+        # Implement LLM integration for NL to SQL translation with security
+        try:
+            # Import input sanitizer for security
+            try:
+                from .input_sanitizer import input_sanitizer
+            except ImportError:
+                from input_sanitizer import input_sanitizer
+            
+            # Sanitize user input before LLM processing
+            sanitization_result = input_sanitizer.sanitize_user_query(request.query)
+            
+            if not sanitization_result.is_safe:
+                logger.warning(f"Unsafe query blocked: {sanitization_result.blocked_patterns}")
+                raise ValidationError(
+                    f"Query contains unsafe patterns: {', '.join(sanitization_result.blocked_patterns)}"
+                )
+            
+            if sanitization_result.warnings:
+                logger.info(f"Query sanitization warnings: {sanitization_result.warnings}")
+            
+            sanitized_query = sanitization_result.sanitized_input
+            
+            # Get database schema for context
+            schema_data = schema_service.get_all_tables_schema()
+            
+            # Import and use LLM service
+            try:
+                from .llm_service import get_llm_service
+            except ImportError:
+                from llm_service import get_llm_service
+            
+            llm_service = get_llm_service()
+            
+            # Translate sanitized question to SQL using LLM (with client IP for rate limiting)
+            client_ip = request.client.host if request.client else "unknown"
+            generated_sql = await llm_service.translate_to_sql(sanitized_query, schema_data, client_ip)
+            
+            # Additional security validation for LLM-generated SQL
+            validated_sql = input_sanitizer.validate_llm_generated_sql(generated_sql, request.query)
+            
+            # Final validation with SQL validator
+            sql_to_execute = sql_validator.validate_query_legacy(validated_sql)
+            logger.info(f"LLM generated and validated SQL: {generated_sql[:100]}...")
+            
+        except (ValidationError, SecurityError) as e:
+            logger.error(f"Security validation failed: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Query validation failed: {str(e)}")
+            
+        except Exception as e:
+            logger.error(f"LLM translation failed: {str(e)}")
+            logger.info("Falling back to pattern matching...")
+            
+            # Fallback to pattern matching if LLM fails
+            if "product" in request.query.lower() and ("performance" in request.query.lower() or "analysis" in request.query.lower()):
+                mock_sql = "SELECT product, SUM(sales_amount) as total_sales FROM sales GROUP BY product ORDER BY total_sales DESC"
+            elif "region" in request.query.lower():
+                mock_sql = "SELECT region, SUM(sales_amount) as total_sales FROM sales GROUP BY region ORDER BY total_sales DESC"
+            elif "time" in request.query.lower() or "trend" in request.query.lower() or "over" in request.query.lower():
+                mock_sql = "SELECT DATE_TRUNC('month', date) as month, SUM(sales_amount) as total_sales FROM sales GROUP BY month ORDER BY month"
+            else:
+                mock_sql = "SELECT product, SUM(sales_amount) as total_sales FROM sales GROUP BY product ORDER BY total_sales DESC LIMIT 10"
+            
+            sql_to_execute = sql_validator.validate_query_legacy(mock_sql)
+            logger.info(f"Using fallback SQL query: {mock_sql}")
     
     # Execute validated query against DuckDB with connection error handling
     try:
@@ -795,8 +949,43 @@ async def process_query(request: QueryRequest, authenticated: bool = Depends(ver
             logger.warning(f"Large result set truncated: {len(data)} rows -> 1000 rows")
             data = data[:1000]
         
-        # TODO: Implement chart type recommendation logic
-        chart_type = "bar"
+        # Implement basic chart type recommendation logic
+        chart_type = "bar"  # Default
+        
+        if data and len(data) > 0:
+            # Analyze the data structure to recommend appropriate chart type
+            first_row = data[0]
+            column_names = list(first_row.keys())
+            
+            # Check for time-based data (line chart)
+            time_indicators = ['date', 'time', 'month', 'year', 'day', 'week', 'quarter']
+            has_time_column = any(any(indicator in col.lower() for indicator in time_indicators) for col in column_names)
+            
+            # Check for categorical vs numerical data
+            numerical_columns = []
+            categorical_columns = []
+            
+            for col in column_names:
+                sample_value = first_row[col]
+                if isinstance(sample_value, (int, float)) and col.lower() not in time_indicators:
+                    numerical_columns.append(col)
+                else:
+                    categorical_columns.append(col)
+            
+            # Recommend chart type based on data structure
+            if has_time_column and len(numerical_columns) >= 1:
+                chart_type = "line"  # Time series data
+            elif len(categorical_columns) == 1 and len(numerical_columns) >= 1:
+                if len(data) <= 6:  # Small number of categories
+                    chart_type = "pie"  # Good for showing parts of a whole
+                else:
+                    chart_type = "bar"  # Better for many categories
+            elif len(categorical_columns) >= 1 and len(numerical_columns) >= 1:
+                chart_type = "bar"  # Standard categorical comparison
+            else:
+                chart_type = "table"  # Fallback for complex data
+        
+        logger.info(f"Recommended chart type: {chart_type} for {len(columns)} columns and {len(data)} rows")
         
         logger.info(f"Query processed successfully: {len(data)} rows returned")
         return QueryResponse(

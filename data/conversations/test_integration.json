@@ -1,0 +1,31 @@
+{
+  "id": "test_integration",
+  "created_at": "2025-09-04T09:22:01.557126",
+  "last_updated": "2025-09-04T09:22:01.557456",
+  "messages": [
+    {
+      "id": "dae34682-818e-428f-9542-9ee63db2fc7a",
+      "type": "user",
+      "content": "Show me invalid data",
+      "timestamp": "2025-09-04T09:22:01.557109",
+      "metadata": {}
+    },
+    {
+      "id": "30216038-ddb6-412d-a488-413e36bac057",
+      "type": "assistant",
+      "content": "I encountered an issue processing your question. Let me try a different approach or you can rephrase your question.",
+      "timestamp": "2025-09-04T09:22:01.557452",
+      "metadata": {
+        "insights": [
+          "There was a technical issue with the data analysis."
+        ],
+        "follow_up_questions": [
+          "Could you try asking your question differently?",
+          "What other data would you like to explore?"
+        ],
+        "chart_config": null,
+        "processing_time_ms": 0.4432201385498047
+      }
+    }
+  ]
+}

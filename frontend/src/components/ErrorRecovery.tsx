@@ -49,6 +49,12 @@ export default function ErrorRecovery({
         return "⚠️";
       case "network":
         return "🌐";
+      case "timeout":
+        return "⏱️";
+      case "data_not_found":
+        return "📊";
+      case "validation":
+        return "✏️";
       default:
         return "❌";
     }
@@ -62,8 +68,33 @@ export default function ErrorRecovery({
         return "Query execution failed";
       case "network":
         return "Connection problem";
+      case "timeout":
+        return "Request timed out";
+      case "data_not_found":
+        return "No data found";
+      case "validation":
+        return "Invalid input";
       default:
         return "Something went wrong";
+    }
+  };
+
+  const getContextualHelp = (phase: string): string | null => {
+    switch (phase) {
+      case "translation":
+        return "Try using simpler language or be more specific about what data you want to see. For example: 'Show me total sales by month' instead of 'Tell me about sales'.";
+      case "execution":
+        return "This usually happens when the data doesn't contain what you're looking for, or the query is too complex. Try asking about specific columns or a smaller subset of data.";
+      case "network":
+        return "Check your internet connection and try again. If the problem persists, the server might be temporarily unavailable.";
+      case "timeout":
+        return "Your question might be too complex or involve too much data. Try asking about a smaller time period or specific categories.";
+      case "data_not_found":
+        return "Make sure you've uploaded data first, or try asking about different aspects of your dataset.";
+      case "validation":
+        return "Check that your question is clear and relates to the data you've uploaded. Avoid very short or vague questions.";
+      default:
+        return null;
     }
   };
 
@@ -114,6 +145,19 @@ export default function ErrorRecovery({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Contextual help based on error type */}
+      {getContextualHelp(error.errorPhase) && (
+        <div className="mb-4 bg-blue-50 border border-blue-200 rounded p-3">
+          <div className="text-blue-700 font-medium text-sm mb-1 flex items-center gap-1">
+            <span>ℹ️</span>
+            <span>Helpful tip:</span>
+          </div>
+          <div className="text-blue-600 text-sm">
+            {getContextualHelp(error.errorPhase)}
+          </div>
         </div>
       )}
 

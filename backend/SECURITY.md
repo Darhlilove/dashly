@@ -1,163 +1,203 @@
-# Security Documentation
+# Dashly Security Guide
 
 ## Overview
 
-This document outlines the security measures implemented in the Dashly backend API to protect against common vulnerabilities and ensure safe operation.
+This document outlines the security measures implemented in Dashly and provides guidance for secure deployment and operation.
 
 ## Security Features Implemented
 
 ### 1. Authentication & Authorization
 
 - **API Key Authentication**: All endpoints require valid API key authentication
-- **Configurable Authentication**: Can be disabled for development (REQUIRE_AUTH=false)
-- **Secure Key Requirements**: API keys must be at least 16 characters long
-- **No Default Keys**: Prevents use of default/demo keys in production
+- **Configurable Auth**: Authentication can be disabled for development (not recommended for production)
+- **Strong Key Requirements**: API keys must be at least 32 characters long
+- **Key Validation**: Automatic validation of API key format and strength
 
-### 2. SQL Injection Prevention
+### 2. Input Sanitization & Validation
 
-- **Comprehensive SQL Validator**: Advanced validation beyond simple keyword blacklisting
-- **Parameterized Queries**: All database operations use parameterized queries
-- **Query Structure Validation**: Ensures only SELECT statements are allowed
-- **Function Whitelisting**: Only safe SQL functions are permitted
-- **Comment Removal**: SQL comments are stripped to prevent hidden malicious code
+- **Query Sanitization**: All user queries are sanitized before LLM processing
+- **Prompt Injection Protection**: Detection and neutralization of prompt injection attempts
+- **SQL Injection Prevention**: Multi-layer SQL injection protection
+- **Input Length Limits**: Configurable limits on query and SQL length
+- **Character Filtering**: Removal of suspicious control characters
 
-### 3. Path Traversal Protection
+### 3. SQL Security
 
-- **Path Validation**: All file paths are validated to prevent directory traversal
-- **Project Boundary Enforcement**: Files must be within project directory
-- **Secure Path Resolution**: Uses Path.resolve() for safe path handling
+- **SELECT-Only Queries**: Only SELECT statements are allowed
+- **DDL/DML Blocking**: All data definition and manipulation operations are blocked
+- **Pattern Detection**: Advanced detection of dangerous SQL patterns
+- **Query Complexity Limits**: Prevention of overly complex queries that could indicate obfuscation
+- **Table Reference Validation**: Validation that queries only reference expected tables
 
-### 4. Input Validation & Sanitization
+### 4. Rate Limiting
 
-- **File Upload Validation**: CSV files are validated for format, size, and content
-- **Data Sanitization**: Sensitive data is redacted in API responses
-- **Request Size Limits**: Prevents resource exhaustion attacks
-- **Query Length Limits**: Reasonable limits on query complexity
+- **Per-Client Limits**: Individual rate limits per client IP/session
+- **Multiple Time Windows**: Per-minute and per-hour limits
+- **Token Usage Tracking**: LLM token usage monitoring and limits
+- **Cooldown Periods**: Automatic cooldown for clients exceeding limits
+- **Failed Request Tracking**: Monitoring of failed requests for abuse detection
 
-### 5. Security Headers
+### 5. File Upload Security
 
-- **Content Security Policy (CSP)**: Prevents XSS attacks
-- **X-Frame-Options**: Prevents clickjacking
-- **X-Content-Type-Options**: Prevents MIME type sniffing
-- **Strict Transport Security**: Enforces HTTPS in production
-- **Permissions Policy**: Restricts browser features
+- **File Type Validation**: Only CSV files are accepted
+- **Size Limits**: Configurable file size limits (default: 50MB)
+- **Content Validation**: CSV content parsing and validation
+- **Path Traversal Protection**: Prevention of directory traversal attacks
+- **Atomic File Operations**: Safe file writing with atomic operations
 
-### 6. Rate Limiting
+### 6. Network Security
 
-- **API Rate Limiting**: Prevents abuse and DoS attacks
-- **Upload Rate Limiting**: Separate limits for file uploads
-- **Configurable Limits**: Can be adjusted based on requirements
+- **CORS Configuration**: Configurable Cross-Origin Resource Sharing
+- **Security Headers**: Comprehensive HTTP security headers
+- **HTTPS Enforcement**: Optional HTTPS-only mode for production
+- **Content Security Policy**: Strict CSP to prevent XSS attacks
 
-### 7. CORS Configuration
+### 7. Error Handling & Information Disclosure
 
-- **Restricted Origins**: Only specified origins are allowed
-- **Configurable Origins**: Environment variable controlled
-- **Credential Handling**: Secure credential passing
-
-### 8. Error Handling
-
-- **Information Disclosure Prevention**: Error messages don't reveal sensitive information
-- **Security Event Logging**: Failed authentication attempts are logged
-- **Graceful Degradation**: Secure fallbacks for error conditions
+- **Sanitized Error Messages**: Error messages don't expose sensitive information
+- **Structured Exception Handling**: Consistent error handling across the application
+- **Security Event Logging**: Comprehensive logging of security events
+- **Failed Attempt Monitoring**: Tracking of failed authentication and validation attempts
 
 ## Configuration
 
 ### Environment Variables
 
 ```bash
-# Required for production
-DASHLY_API_KEY=your-secure-random-key-here  # Min 16 chars
-REQUIRE_AUTH=true
+# Security Configuration
+DASHLY_API_KEY=your_secure_random_key_here  # Generate with: openssl rand -hex 32
+REQUIRE_AUTH=true                           # Always true for production
+ALLOWED_ORIGINS=https://yourdomain.com      # Restrict to your actual domains
 
-# Optional configuration
-ALLOWED_ORIGINS=https://yourdomain.com
-MAX_REQUESTS_PER_HOUR=100
-MAX_UPLOADS_PER_HOUR=10
+# Rate Limiting
+MAX_REQUESTS_PER_HOUR=500
+MAX_UPLOADS_PER_HOUR=50
+
+# LLM Security
+OPENROUTER_API_KEY=your_openrouter_key_here # Never commit this to version control
 ```
 
-### Generating Secure API Keys
+### Security Configuration File
+
+The `security_config.py` file centralizes all security settings:
 
 ```python
-import secrets
-api_key = secrets.token_urlsafe(32)
-print(f"DASHLY_API_KEY={api_key}")
+# Example security configuration
+security_config = SecurityConfig(
+    MAX_CSV_SIZE_MB=50,
+    MAX_QUERY_LENGTH=500,
+    REQUIRE_AUTH=True,
+    ENABLE_INPUT_SANITIZATION=True,
+    LOG_SECURITY_EVENTS=True
+)
 ```
 
-## Security Best Practices
+## Deployment Security Checklist
 
-### For Development
+### Pre-Deployment
 
-1. Use `.env.development` for local development
-2. Never commit real API keys to version control
-3. Use authentication bypass only in isolated development environments
-4. Regularly update dependencies
+- [ ] Generate secure API keys using `openssl rand -hex 32`
+- [ ] Set `REQUIRE_AUTH=true`
+- [ ] Configure `ALLOWED_ORIGINS` to your actual frontend domains
+- [ ] Set `DEBUG=false` and appropriate `LOG_LEVEL`
+- [ ] Ensure `.env` files are not committed to version control
+- [ ] Review and test all security configurations
 
-### For Production
+### Production Environment
 
-1. Always set `REQUIRE_AUTH=true`
-2. Use strong, randomly generated API keys
-3. Enable HTTPS with proper certificates
-4. Configure proper CORS origins
-5. Monitor security logs regularly
-6. Implement proper backup and recovery procedures
+- [ ] Use HTTPS for all communications
+- [ ] Set `ENABLE_HTTPS_ONLY=true`
+- [ ] Configure proper firewall rules
+- [ ] Set up monitoring and alerting for security events
+- [ ] Implement log aggregation and analysis
+- [ ] Regular security audits and updates
 
-### For Database Operations
+### Monitoring
 
-1. All queries are validated before execution
-2. Only SELECT operations are allowed
-3. Parameterized queries prevent SQL injection
-4. Sample data is sanitized to prevent information disclosure
+- [ ] Monitor rate limiting statistics via `/api/security/stats`
+- [ ] Set up alerts for suspicious activity patterns
+- [ ] Regular review of security logs
+- [ ] Monitor LLM API usage and costs
 
-## Vulnerability Reporting
+## Security Endpoints
 
-If you discover a security vulnerability, please:
+### GET /api/security/stats
 
-1. Do not create a public issue
-2. Contact the development team privately
-3. Provide detailed information about the vulnerability
-4. Allow time for the issue to be addressed before disclosure
+Returns security statistics including:
 
-## Security Testing
+- Input sanitization metrics
+- Rate limiting statistics
+- Authentication status
+- Current security configuration
 
-Run the security test suite:
+**Authentication Required**: Yes
 
-```bash
-cd backend
-python -m pytest src/test_security_fixes.py -v
-```
+## Threat Model
+
+### Threats Mitigated
+
+1. **SQL Injection**: Multi-layer validation and sanitization
+2. **Prompt Injection**: LLM input sanitization and validation
+3. **Path Traversal**: File path validation and sandboxing
+4. **Rate Limiting Abuse**: Comprehensive rate limiting system
+5. **Authentication Bypass**: Strong API key requirements
+6. **XSS Attacks**: Content Security Policy and output encoding
+7. **CSRF Attacks**: Proper CORS configuration
+8. **Information Disclosure**: Sanitized error messages
+
+### Residual Risks
+
+1. **LLM Model Vulnerabilities**: Dependent on OpenRouter/model security
+2. **DuckDB Vulnerabilities**: Dependent on DuckDB security updates
+3. **Dependency Vulnerabilities**: Regular updates required
+4. **Social Engineering**: User education required
+
+## Incident Response
+
+### Security Event Types
+
+- **Authentication Failures**: Failed API key attempts
+- **Input Validation Failures**: Blocked malicious inputs
+- **Rate Limit Violations**: Excessive request patterns
+- **File Upload Violations**: Invalid or malicious file uploads
+- **SQL Security Violations**: Dangerous query attempts
+
+### Response Procedures
+
+1. **Immediate**: Automatic blocking and logging
+2. **Short-term**: Alert administrators and investigate
+3. **Long-term**: Update security rules and configurations
+
+## Security Updates
+
+### Regular Tasks
+
+- Update dependencies monthly
+- Review security logs weekly
+- Rotate API keys quarterly
+- Security audit annually
+
+### Emergency Procedures
+
+- Immediate API key rotation if compromised
+- Rate limit adjustment for attack mitigation
+- Emergency shutdown procedures if needed
+
+## Contact
+
+For security issues or questions:
+
+- Review this documentation
+- Check security logs and monitoring
+- Implement additional security measures as needed
 
 ## Compliance Notes
 
-- Input validation follows OWASP guidelines
-- SQL injection prevention uses multiple layers of protection
-- Authentication follows industry best practices
-- Error handling prevents information disclosure
-- Logging includes security event monitoring
+This implementation includes security measures appropriate for:
 
-## Regular Security Tasks
+- Data protection requirements
+- API security best practices
+- Input validation standards
+- Authentication and authorization controls
 
-1. **Weekly**: Review security logs for anomalies
-2. **Monthly**: Update dependencies and scan for vulnerabilities
-3. **Quarterly**: Review and rotate API keys
-4. **Annually**: Conduct comprehensive security audit
-
-## Known Limitations
-
-1. **LLM Integration**: When implemented, ensure proper input sanitization
-2. **File Processing**: Large files could impact performance
-3. **Rate Limiting**: In-memory implementation doesn't persist across restarts
-4. **Session Management**: Simple API key auth may need enhancement for multi-user scenarios
-
-## Security Checklist
-
-- [ ] API keys are properly configured
-- [ ] Authentication is enabled in production
-- [ ] HTTPS is configured and enforced
-- [ ] CORS origins are properly restricted
-- [ ] Security headers are enabled
-- [ ] Rate limiting is configured
-- [ ] Input validation is comprehensive
-- [ ] Error messages don't leak information
-- [ ] Security logging is enabled
-- [ ] Dependencies are up to date
-- [ ] Security tests pass
+Regular security reviews and updates are recommended to maintain security posture.

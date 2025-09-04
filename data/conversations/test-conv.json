@@ -1,0 +1,34 @@
+{
+  "id": "test-conv",
+  "created_at": "2025-09-04T09:22:11.303074",
+  "last_updated": "2025-09-04T09:22:11.304501",
+  "messages": [
+    {
+      "id": "2557c9f8-98e5-4a57-98b4-9085edd14d39",
+      "type": "user",
+      "content": "How many sales do I have?",
+      "timestamp": "2025-09-04T09:22:11.302950",
+      "metadata": {}
+    },
+    {
+      "id": "50d9f355-00f2-41cf-83da-146f92b7bafb",
+      "type": "assistant",
+      "content": "Here's the count you asked for: Found exactly one matching result.",
+      "timestamp": "2025-09-04T09:22:11.304496",
+      "metadata": {
+        "insights": [
+          "Found exactly one matching result.",
+          "Found exactly one result.",
+          "The data includes 1 different attributes."
+        ],
+        "follow_up_questions": [
+          "Which products or services are your top performers?",
+          "How do different customer segments contribute to these results?",
+          "What other aspects of this data would you like to explore?"
+        ],
+        "chart_config": null,
+        "processing_time_ms": 1.8382072448730469
+      }
+    }
+  ]
+}

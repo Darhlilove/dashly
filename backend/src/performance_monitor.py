@@ -222,10 +222,9 @@ class PerformanceMonitor:
             
             # Clean up old minute data (keep last hour)
             cutoff_time = current_minute - timedelta(hours=1)
-            self._query_times_by_minute = {
-                k: v for k, v in self._query_times_by_minute.items() 
-                if k >= cutoff_time
-            }
+            keys_to_remove = [k for k in self._query_times_by_minute.keys() if k < cutoff_time]
+            for key in keys_to_remove:
+                del self._query_times_by_minute[key]
             
             # Log execution summary
             status = "SUCCESS" if success else "FAILED"

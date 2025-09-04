@@ -52,7 +52,7 @@ class ChatErrorHandler:
         """
         return {
             "no_data": {
-                "keywords": ["no data", "empty", "no results", "0 rows"],
+                "keywords": ["no data", "empty", "no results", "0 rows", "no rows returned"],
                 "message": "I couldn't find any data that matches what you're looking for. This might mean the criteria are too specific or the data doesn't contain that information.",
                 "insights": ["No data matches your specific criteria."],
                 "suggestions": [
@@ -66,9 +66,9 @@ class ChatErrorHandler:
                 "message": "I couldn't find that specific information in your data. It looks like you're asking about something that might not be available in the dataset.",
                 "insights": ["The data doesn't contain the specific field you're looking for."],
                 "suggestions": [
+                    "Try asking about different columns or fields in your data",
                     "What columns or fields are available in the data?",
-                    "Can you show me what information is in the dataset?",
-                    "What would you like to explore instead?"
+                    "Can you show me what information is in the dataset?"
                 ]
             },
             "table_not_found": {
@@ -86,9 +86,9 @@ class ChatErrorHandler:
                 "message": "That question is taking a bit too long to process. Let's try something simpler or more specific.",
                 "insights": ["The query is too complex or the dataset is very large."],
                 "suggestions": [
+                    "Try asking a simpler question about your data",
                     "Can you ask about a smaller subset of the data?",
-                    "Would you like to see a summary first?",
-                    "Try asking about a specific time period or category"
+                    "Would you like to see a summary first?"
                 ]
             },
             "too_large": {
@@ -139,6 +139,66 @@ class ChatErrorHandler:
                     "What specific data would you like to explore?",
                     "Are you looking for totals, averages, or trends?",
                     "Would you like to see a summary of what data is available?"
+                ]
+            },
+            "data_processing_failed": {
+                "keywords": ["processing failed", "analysis failed", "computation error"],
+                "message": "I ran into an issue while processing your data. This sometimes happens with complex queries or large datasets.",
+                "insights": ["The data processing encountered an unexpected issue."],
+                "suggestions": [
+                    "Try asking a simpler question first",
+                    "Would you like to see a basic summary of your data?",
+                    "Can we break this down into smaller parts?"
+                ]
+            },
+            "invalid_query": {
+                "keywords": ["invalid query", "malformed", "cannot parse"],
+                "message": "I'm having trouble understanding your question. Could you try rephrasing it in a different way?",
+                "insights": ["The question format might be unclear or too complex."],
+                "suggestions": [
+                    "Try using simpler, more direct language",
+                    "Ask about one thing at a time",
+                    "Example: 'Show me total sales by month'"
+                ]
+            },
+            "service_unavailable": {
+                "keywords": ["service unavailable", "temporarily unavailable", "maintenance"],
+                "message": "The data analysis service is temporarily unavailable. This is usually brief - please try again in a moment.",
+                "insights": ["The service is experiencing temporary issues."],
+                "suggestions": [
+                    "Try again in a few moments",
+                    "Check if there are any system notifications",
+                    "Contact support if the issue persists"
+                ]
+            },
+            "rate_limit": {
+                "keywords": ["rate limit", "too many requests", "quota exceeded"],
+                "message": "You're asking questions a bit too quickly! Please wait a moment before trying again.",
+                "insights": ["Request rate limit has been exceeded."],
+                "suggestions": [
+                    "Wait a few seconds before asking another question",
+                    "Try combining multiple questions into one",
+                    "Consider the complexity of your questions"
+                ]
+            },
+            "data_format_error": {
+                "keywords": ["format error", "parsing error", "invalid format"],
+                "message": "There seems to be an issue with how your data is formatted. Some values might not be in the expected format.",
+                "insights": ["The data contains formatting issues that prevent analysis."],
+                "suggestions": [
+                    "Check if your CSV file has consistent formatting",
+                    "Try uploading the data again",
+                    "Ask about specific columns that might work better"
+                ]
+            },
+            "memory_limit": {
+                "keywords": ["memory", "out of memory", "resource limit"],
+                "message": "Your query is trying to process too much data at once. Let's try a more focused approach.",
+                "insights": ["The query requires too much memory to process."],
+                "suggestions": [
+                    "Try filtering to a smaller date range",
+                    "Ask about specific categories instead of all data",
+                    "Break your question into smaller parts"
                 ]
             }
         }
@@ -461,3 +521,142 @@ class ChatErrorHandler:
                 alternatives.append("How does this break down by category?")
         
         return alternatives[:5]  # Limit to 5 alternatives
+    
+    def generate_contextual_error_response(
+        self,
+        error: Exception,
+        user_message: str,
+        conversation_id: str,
+        context: Optional[Dict[str, Any]] = None,
+        data_info: Optional[Dict[str, Any]] = None
+    ) -> ConversationalResponse:
+        """
+        Generate a contextual error response that takes into account user history and data availability.
+        
+        Args:
+            error: The exception that occurred
+            user_message: The user's original message
+            conversation_id: Conversation identifier
+            context: Optional conversation context
+            data_info: Optional information about available data
+            
+        Returns:
+            ConversationalResponse: Contextual error response with personalized suggestions
+        """
+        # Start with the base error response
+        base_response = self.handle_chat_error(error, user_message, conversation_id, context)
+        
+        # Enhance with contextual information
+        enhanced_insights = list(base_response.insights)
+        enhanced_suggestions = list(base_response.follow_up_questions)
+        
+        # Add data-specific context if available
+        if data_info:
+            if "tables" in data_info and data_info["tables"]:
+                table_names = list(data_info["tables"].keys())
+                enhanced_insights.append(f"Available data tables: {', '.join(table_names)}")
+                
+            if "row_count" in data_info:
+                enhanced_insights.append(f"Your dataset contains {data_info['row_count']:,} rows of data")
+        
+        # Add conversation-specific context
+        if context and "conversation_history" in context:
+            history = context["conversation_history"]
+            if len(history) > 3:
+                enhanced_suggestions.insert(0, "Based on our conversation, maybe we should try a different approach")
+            
+            # Look for patterns in previous questions
+            recent_questions = [msg.get("message", "") for msg in history[-3:] if msg.get("role") == "user"]
+            if recent_questions:
+                all_text = " ".join(recent_questions).lower()
+                if "sales" in all_text or "revenue" in all_text:
+                    enhanced_suggestions.append("Would you like to explore sales data in a different way?")
+                elif "customer" in all_text:
+                    enhanced_suggestions.append("Should we look at customer data from another angle?")
+        
+        # Generate alternative questions based on the failed question and available data
+        alternatives = self.generate_alternative_questions(user_message, data_info)
+        if alternatives:
+            enhanced_suggestions.extend(alternatives[:2])  # Add top 2 alternatives
+        
+        # Limit suggestions to avoid overwhelming the user
+        enhanced_suggestions = enhanced_suggestions[:5]
+        enhanced_insights = enhanced_insights[:4]
+        
+        return ConversationalResponse(
+            message=base_response.message,
+            chart_config=None,
+            insights=enhanced_insights,
+            follow_up_questions=enhanced_suggestions,
+            processing_time_ms=0.0,
+            conversation_id=conversation_id
+        )
+    
+    def handle_no_data_uploaded_error(self, user_message: str, conversation_id: str) -> ConversationalResponse:
+        """
+        Handle the specific case where user asks questions but no data has been uploaded.
+        
+        Args:
+            user_message: The user's original message
+            conversation_id: Conversation identifier
+            
+        Returns:
+            ConversationalResponse: Helpful response about uploading data
+        """
+        message = "I'd love to help you analyze that data, but it looks like you haven't uploaded any data yet. Once you upload a CSV file, I'll be able to answer questions about it!"
+        
+        insights = [
+            "No data has been uploaded to analyze yet.",
+            "Upload a CSV file to get started with data analysis."
+        ]
+        
+        suggestions = [
+            "Click the upload button to add your CSV file",
+            "Try the demo data to see how the system works",
+            "What kind of data are you planning to analyze?"
+        ]
+        
+        return ConversationalResponse(
+            message=message,
+            chart_config=None,
+            insights=insights,
+            follow_up_questions=suggestions,
+            processing_time_ms=0.0,
+            conversation_id=conversation_id
+        )
+    
+    def handle_data_quality_error(
+        self, 
+        user_message: str, 
+        conversation_id: str,
+        quality_issues: List[str]
+    ) -> ConversationalResponse:
+        """
+        Handle errors related to data quality issues.
+        
+        Args:
+            user_message: The user's original message
+            conversation_id: Conversation identifier
+            quality_issues: List of specific data quality issues found
+            
+        Returns:
+            ConversationalResponse: Response explaining data quality issues and solutions
+        """
+        message = "I found some issues with your data that are preventing me from answering your question properly. Let me explain what I found and how we can work around it."
+        
+        insights = ["Data quality issues detected:"] + quality_issues[:3]
+        
+        suggestions = [
+            "Try asking about columns that have cleaner data",
+            "Would you like to see a summary of data quality issues?",
+            "Should we focus on a subset of the data that's more complete?"
+        ]
+        
+        return ConversationalResponse(
+            message=message,
+            chart_config=None,
+            insights=insights,
+            follow_up_questions=suggestions,
+            processing_time_ms=0.0,
+            conversation_id=conversation_id
+        )

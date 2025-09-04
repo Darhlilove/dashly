@@ -2,7 +2,16 @@ import React, { useState, useRef, useEffect } from "react";
 import MessageRenderer, { ChatMessage } from "./MessageRenderer";
 import { useChat } from "../hooks/useChat";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { ApiError } from "../types/api";
+import { QueryProcessingLoading } from "./LoadingState";
+import { QueryExecutionProgress } from "./ProgressIndicator";
+import { useLoadingState } from "../hooks/useLoadingState";
+import {
+  ApiError,
+  ConversationalResponse,
+  ExecuteResponse,
+} from "../types/api";
+import { ChartConfig } from "../types/chart";
+import { viewStateManager } from "../services/viewStateManager";
 
 interface ConversationInterfaceProps {
   onSendMessage?: (message: string) => void;
@@ -14,6 +23,20 @@ interface ConversationInterfaceProps {
   onError?: (error: ApiError) => void;
   onSuccess?: (response: any) => void;
   useBuiltInChat?: boolean; // New prop to enable built-in chat functionality
+  onDashboardUpdate?: (
+    chartConfig: ChartConfig,
+    queryResults?: ExecuteResponse,
+    query?: string
+  ) => void; // New prop for dashboard updates
+  enableViewStateManagement?: boolean; // New prop to enable automatic view state management
+  processingStage?:
+    | "translating"
+    | "executing"
+    | "processing"
+    | "generating_chart"
+    | "complete";
+  processingProgress?: number;
+  currentQuery?: string;
 }
 
 export default function ConversationInterface({
@@ -26,6 +49,11 @@ export default function ConversationInterface({
   onError,
   onSuccess,
   useBuiltInChat = false,
+  onDashboardUpdate,
+  enableViewStateManagement = true,
+  processingStage = "processing",
+  processingProgress,
+  currentQuery,
 }: ConversationInterfaceProps) {
   const [input, setInput] = useState("");
   const [focusedSuggestionIndex, setFocusedSuggestionIndex] = useState(-1);
@@ -37,7 +65,11 @@ export default function ConversationInterface({
   // Use built-in chat hook if enabled, otherwise use external props
   const chat = useChat({
     onError,
-    onSuccess,
+    onSuccess: (response: ConversationalResponse) => {
+      // Handle chat response with proper view routing
+      handleChatResponse(response);
+      onSuccess?.(response);
+    },
   });
 
   const messages = useBuiltInChat ? chat.messages : externalMessages || [];
@@ -45,6 +77,56 @@ export default function ConversationInterface({
     ? chat.isProcessing
     : externalIsProcessing || false;
   const isLoadingHistory = useBuiltInChat ? chat.isLoadingHistory : false;
+
+  // Get loading state for enhanced progress display
+  const { queryExecution } = useLoadingState();
+
+  /**
+   * Handle chat response with proper view routing
+   * Requirements: 2.5, 2.7 - Route responses to correct view and implement automatic view switching
+   */
+  const handleChatResponse = (response: ConversationalResponse) => {
+    if (!enableViewStateManagement) {
+      return;
+    }
+
+    // Check if response contains chart configuration (visualization)
+    if (response.chart_config) {
+      console.log(
+        "📊 Chat response contains visualization - routing to dashboard view"
+      );
+
+      // Create placeholder query results if not provided
+      // In a full implementation, the backend would provide both chart config and query results
+      const queryResults: ExecuteResponse = {
+        columns: [],
+        rows: [],
+        row_count: 0,
+        runtime_ms: 0,
+        truncated: false,
+      };
+
+      // Update dashboard view state (never affects data view)
+      // This automatically switches to dashboard view when visualizations are created
+      viewStateManager.updateDashboardData(
+        queryResults,
+        response.chart_config,
+        "", // Query text would come from the original message
+        true // Auto-switch to dashboard view
+      );
+
+      // Notify parent component about dashboard update
+      onDashboardUpdate?.(response.chart_config, queryResults, "");
+
+      console.log(
+        "✅ Visualization routed to dashboard view, data view preserved"
+      );
+    } else {
+      console.log(
+        "💬 Chat response contains no visualization - staying in current view"
+      );
+    }
+  };
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -124,24 +206,46 @@ export default function ConversationInterface({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim() && !isProcessing) {
+      const message = input.trim();
+
       if (useBuiltInChat) {
-        chat.sendMessage(input.trim());
+        // Built-in chat handles response routing automatically
+        chat.sendMessage(message);
       } else if (onSendMessage) {
-        onSendMessage(input.trim());
+        // External message handler - preserve existing behavior
+        onSendMessage(message);
       }
+
       setInput("");
+
+      // Log message routing for debugging
+      console.log(
+        `💬 Message sent: "${message.substring(0, 50)}${
+          message.length > 50 ? "..." : ""
+        }" (${useBuiltInChat ? "built-in" : "external"} chat)`
+      );
     }
   };
 
   const handleSuggestedQuestion = (question: string) => {
     if (!isProcessing) {
       if (useBuiltInChat) {
+        // Built-in chat handles response routing automatically
         chat.sendMessage(question);
       } else if (onSendMessage) {
+        // External message handler - preserve existing behavior
         onSendMessage(question);
       }
+
       setFocusedSuggestionIndex(-1);
       inputRef.current?.focus();
+
+      // Log suggested question routing for debugging
+      console.log(
+        `💬 Suggested question sent: "${question}" (${
+          useBuiltInChat ? "built-in" : "external"
+        } chat)`
+      );
     }
   };
 
@@ -276,8 +380,34 @@ export default function ConversationInterface({
               />
             ))}
 
-            {/* Typing indicator */}
-            {isProcessing && <TypingIndicator />}
+            {/* Enhanced processing indicator */}
+            {(isProcessing || queryExecution.isLoading) && (
+              <div
+                className="flex justify-start"
+                role="status"
+                aria-live="polite"
+              >
+                <div className="bg-gray-100 border border-gray-200 px-4 py-3 rounded-lg max-w-[90%]">
+                  {queryExecution.isLoading ? (
+                    <QueryExecutionProgress
+                      currentStage={
+                        (queryExecution.stage as any) || "translating"
+                      }
+                      queryText={currentQuery}
+                      progress={queryExecution.progress}
+                      error={queryExecution.error}
+                    />
+                  ) : (
+                    <QueryProcessingLoading
+                      isLoading={true}
+                      stage={processingStage}
+                      progress={processingProgress}
+                      queryText={currentQuery}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
           </>
         )}
         <div ref={messagesEndRef} />
@@ -342,7 +472,7 @@ export default function ConversationInterface({
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+                  d="M12 5l7 7-7 7M5 12h14"
                 />
               </svg>
             )}

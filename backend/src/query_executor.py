@@ -337,8 +337,8 @@ class QueryExecutor:
             logger.info(f"Cache hit for query {task_id}: {sql[:50]}...")
             return QueryResult(
                 columns=cached_result.columns,
-                rows=cached_result.data,
-                row_count=len(cached_result.data),
+                rows=cached_result.rows,
+                row_count=len(cached_result.rows),
                 runtime_ms=1.0,  # Very fast for cached
                 truncated=cached_result.truncated if hasattr(cached_result, 'truncated') else False
             )
@@ -366,7 +366,7 @@ class QueryExecutor:
                     try:
                         execute_response = ExecuteResponse(
                             columns=result.columns,
-                            data=[dict(zip(result.columns, row)) for row in result.rows],
+                            rows=result.rows,
                             row_count=result.row_count,
                             runtime_ms=runtime_ms,
                             truncated=result.truncated

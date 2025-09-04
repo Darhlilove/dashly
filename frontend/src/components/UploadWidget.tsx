@@ -1,12 +1,24 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback } from "react";
 
-import LoadingSpinner from './LoadingSpinner';
+import LoadingSpinner from "./LoadingSpinner";
+import { FileUploadLoading, DataProcessingLoading } from "./LoadingState";
 
 interface UploadWidgetProps {
   onFileUpload: (file: File) => void;
   onDemoData: () => void;
   isLoading: boolean;
   error: string | null;
+  uploadProgress?: number;
+  uploadStage?: "validating" | "uploading" | "processing" | "complete";
+  processingStage?:
+    | "uploading"
+    | "parsing"
+    | "validating"
+    | "storing"
+    | "complete";
+  fileName?: string;
+  rowsProcessed?: number;
+  totalRows?: number;
 }
 
 const UploadWidget: React.FC<UploadWidgetProps> = ({
@@ -14,6 +26,12 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
   onDemoData,
   isLoading,
   error,
+  uploadProgress,
+  uploadStage = "uploading",
+  processingStage = "uploading",
+  fileName: uploadingFileName,
+  rowsProcessed,
+  totalRows,
 }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -21,7 +39,10 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
 
   const handleFileSelect = useCallback((file: File) => {
     // Validate file type
-    if (!file.type.includes('csv') && !file.name.toLowerCase().endsWith('.csv')) {
+    if (
+      !file.type.includes("csv") &&
+      !file.name.toLowerCase().endsWith(".csv")
+    ) {
       // Error handling is now done by parent component
       return;
     }
@@ -36,7 +57,9 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
     setSelectedFile(file);
   }, []);
 
-  const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileInputChange = (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = event.target.files?.[0];
     if (file) {
       handleFileSelect(file);
@@ -79,22 +102,25 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
   const clearSelectedFile = () => {
     setSelectedFile(null);
     if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      fileInputRef.current.value = "";
     }
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto p-4 sm:p-6" data-testid="upload-widget">
-
+    <div
+      className="w-full max-w-2xl mx-auto p-4 sm:p-6"
+      data-testid="upload-widget"
+    >
       {/* File Upload Area */}
       <div
         className={`
           relative border-2 border-dashed rounded-lg p-4 sm:p-6 lg:p-8 text-center transition-colors
-          ${isDragOver 
-            ? 'border-blue-400 bg-blue-50' 
-            : 'border-gray-300 hover:border-gray-400'
+          ${
+            isDragOver
+              ? "border-blue-400 bg-blue-50"
+              : "border-gray-300 hover:border-gray-400"
           }
-          ${isLoading ? 'pointer-events-none opacity-50' : ''}
+          ${isLoading ? "pointer-events-none opacity-50" : ""}
         `}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -115,10 +141,22 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
 
         {isLoading ? (
           <div className="flex flex-col items-center">
-            <LoadingSpinner size="lg" className="mb-4" />
-            <p className="text-sm sm:text-base text-gray-600">
-              {selectedFile ? 'Uploading file...' : 'Loading demo data...'}
-            </p>
+            {selectedFile ? (
+              <FileUploadLoading
+                isLoading={true}
+                fileName={uploadingFileName || selectedFile.name}
+                progress={uploadProgress}
+                stage={uploadStage}
+              />
+            ) : (
+              <DataProcessingLoading
+                isLoading={true}
+                stage={processingStage}
+                fileName="demo data"
+                rowsProcessed={rowsProcessed}
+                totalRows={totalRows}
+              />
+            )}
           </div>
         ) : selectedFile ? (
           <div className="flex flex-col items-center">
@@ -198,7 +236,10 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
             >
               Browse Files
             </button>
-            <p id="file-requirements" className="text-xs text-gray-500 mt-2 text-center">
+            <p
+              id="file-requirements"
+              className="text-xs text-gray-500 mt-2 text-center"
+            >
               CSV files up to 10MB supported
             </p>
           </div>
@@ -208,7 +249,10 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
       {/* Demo Data Section */}
       <div className="mt-6 sm:mt-8 text-center">
         <div className="relative">
-          <div className="absolute inset-0 flex items-center" aria-hidden="true">
+          <div
+            className="absolute inset-0 flex items-center"
+            aria-hidden="true"
+          >
             <div className="w-full border-t border-gray-300" />
           </div>
           <div className="relative flex justify-center text-sm">
@@ -233,7 +277,7 @@ const UploadWidget: React.FC<UploadWidgetProps> = ({
 
         {/* Error Display */}
         {error && (
-          <div 
+          <div
             className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg"
             role="alert"
             aria-live="polite"

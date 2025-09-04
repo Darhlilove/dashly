@@ -22,6 +22,41 @@ interface BarChartComponentProps {
 
 const BarChartComponent: React.FC<BarChartComponentProps> = memo(
   ({ data, config, colors, height }) => {
+    // Debug logging to help diagnose chart rendering issues
+    console.log("BarChartComponent - Data:", data);
+    console.log("BarChartComponent - Config:", config);
+    console.log("BarChartComponent - Data length:", data?.length);
+
+    // Check if we have valid data
+    if (!data || data.length === 0) {
+      return (
+        <div
+          style={{
+            height,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <p>No data available for chart</p>
+        </div>
+      );
+    }
+
+    // Check if Y values exist and are numeric
+    const yKey = config.y || "value";
+    const hasValidYValues = data.some((item) => {
+      const yValue = item[yKey];
+      return yValue !== undefined && yValue !== null && !isNaN(Number(yValue));
+    });
+
+    console.log("BarChartComponent - Y key:", yKey);
+    console.log("BarChartComponent - Has valid Y values:", hasValidYValues);
+    console.log(
+      "BarChartComponent - Sample Y values:",
+      data.slice(0, 3).map((item) => ({ [yKey]: item[yKey] }))
+    );
+
     return (
       <ResponsiveContainer width="100%" height={height}>
         <BarChart

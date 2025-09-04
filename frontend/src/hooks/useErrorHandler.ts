@@ -241,6 +241,43 @@ export const useQueryErrorHandler = () => {
         console.warn("Empty query provided");
       } else if (error.code === "422") {
         console.warn("Query validation failed");
+      } else if (error.code === "COLUMN_NOT_FOUND") {
+        console.warn("Column not found in dataset");
+      } else if (error.code === "TIMEOUT_ERROR") {
+        console.warn("Query execution timed out");
+      }
+    },
+  });
+};
+
+export const useChatErrorHandler = () => {
+  return useErrorHandler({
+    maxRetries: 1, // Fewer retries for chat to avoid long waits
+    retryDelay: 2000,
+    autoRetry: false, // Don't auto-retry chat messages
+    onError: (error) => {
+      if (error.code === "TRANSLATION_FAILED") {
+        console.warn("Failed to translate natural language to SQL");
+      } else if (error.code === "NO_DATA_UPLOADED") {
+        console.warn("User tried to query without uploading data");
+      } else if (error.code === "VAGUE_QUESTION") {
+        console.warn("User question was too vague to process");
+      }
+    },
+  });
+};
+
+export const useDataErrorHandler = () => {
+  return useErrorHandler({
+    maxRetries: 1,
+    retryDelay: 1000,
+    onError: (error) => {
+      if (error.code === "NO_DATA_UPLOADED") {
+        console.warn("No data available for analysis");
+      } else if (error.code === "DATA_QUALITY_ISSUES") {
+        console.warn("Data quality issues detected");
+      } else if (error.code === "TABLE_NOT_FOUND") {
+        console.warn("Data table not found");
       }
     },
   });
